@@ -6,3 +6,6 @@
 
 # Balancer
 - balancer 만들기
+
+### 회의록
+- [x] [2024.11.30](https://github.com/SagiK-Repository/Balancer/issues/1)
