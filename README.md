@@ -1,27 +1,7 @@
 문서정보 : 2023.05.26.~ 작성, 작성자 [@SAgiKPJH](https://github.com/SAgiKPJH)
+재개 : 2024.11.30.~ 구성 [@SAgiKPJH](https://github.com/SAgiKPJH) [@ttkpark](https://github.com/ttkpark) [@gypark](https://github.com/gyfolder)
+
+![image](https://github.com/u0ser-attachments/assets/9bc4ba98-39f4-4f7c-9a1e-dd2aae04129f)
 
 # Balancer
-balancer 만들기
-
-<br>
-
-# 목표
-- [ ] 개요
-- [ ] 요구사항
-- [ ] 기술적 요구사항
-- [ ] 물리적 요구사항
-- [ ] 재료
-  - [ ] 프로파일
-  - [ ] 모터
-  - [ ] 프로세서
-- [ ] Git 구축
-- [ ] Test 구축
-- [ ] 개발 방법
-- [ ] 앱 서비스
-- [ ] 설계
-  - [ ] 개발 환경
-  - [ ] 개발 구조
-  - [ ] 개발 관리
-  - [ ] 개발 일정
-- [ ] 예산
-- [ ] 발전성
+- balancer 만들기
