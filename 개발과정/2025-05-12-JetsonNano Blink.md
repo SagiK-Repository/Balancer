@@ -413,3 +413,332 @@ Jetson Nano에 LED를 연결하는 방법:
 gpiochip1은 시스템 전원 관리에 관련된 GPIO 라인을 포함하고 있으며 대부분 이미 사용 중입니다. 외부 핀 제어에는 주로 gpiochip0을 사용하는 것이 좋습니다.
 
 
+
+// BitBangSPI.h에 포함
+#include <gpiod.h>
+
+class BitBangSPI {
+private:
+    // 기존 멤버 변수에 추가
+    struct gpiod_chip* chip;
+    struct gpiod_line* mosi_line;
+    struct gpiod_line* miso_line;
+    struct gpiod_line* sclk_line;
+    struct gpiod_line* cs_line;
+    // ...
+};
+
+// BitBangSPI.cpp 수정
+void BitBangSPI::initGPIO() {
+    // gpiochip0 열기
+    chip = gpiod_chip_open("/dev/gpiochip0");
+    if (!chip) {
+        throw std::runtime_error("Failed to open GPIO chip");
+    }
+    
+    // GPIO 라인 얻기
+    mosi_line = gpiod_chip_get_line(chip, mosi_pin_);
+    miso_line = gpiod_chip_get_line(chip, miso_pin_);
+    sclk_line = gpiod_chip_get_line(chip, sclk_pin_);
+    cs_line = gpiod_chip_get_line(chip, cs_pin_);
+    
+    if (!mosi_line || !miso_line || !sclk_line || !cs_line) {
+        gpiod_chip_close(chip);
+        throw std::runtime_error("Failed to get GPIO lines");
+    }
+    
+    // 라인 설정
+    int ret = gpiod_line_request_output(mosi_line, "spi_mosi", 0);
+    if (ret < 0) {
+        gpiod_chip_close(chip);
+        throw std::runtime_error("Failed to request MOSI GPIO line as output");
+    }
+    
+    ret = gpiod_line_request_input(miso_line, "spi_miso");
+    if (ret < 0) {
+        gpiod_line_release(mosi_line);
+        gpiod_chip_close(chip);
+        throw std::runtime_error("Failed to request MISO GPIO line as input");
+    }
+    
+    ret = gpiod_line_request_output(sclk_line, "spi_sclk", cpol_);
+    if (ret < 0) {
+        gpiod_line_release(mosi_line);
+        gpiod_line_release(miso_line);
+        gpiod_chip_close(chip);
+        throw std::runtime_error("Failed to request SCLK GPIO line as output");
+    }
+    
+    ret = gpiod_line_request_output(cs_line, "spi_cs", 1);  // CS는 HIGH로 시작
+    if (ret < 0) {
+        gpiod_line_release(mosi_line);
+        gpiod_line_release(miso_line);
+        gpiod_line_release(sclk_line);
+        gpiod_chip_close(chip);
+        throw std::runtime_error("Failed to request CS GPIO line as output");
+    }
+    
+    gpio_initialized_ = true;
+}
+
+// GPIO 상태 설정/읽기 함수도 수정
+void BitBangSPI::writePin(int line, bool value) {
+    if (line == mosi_pin_) {
+        gpiod_line_set_value(mosi_line, value ? 1 : 0);
+    } else if (line == sclk_pin_) {
+        gpiod_line_set_value(sclk_line, value ? 1 : 0);
+    } else if (line == cs_pin_) {
+        gpiod_line_set_value(cs_line, value ? 1 : 0);
+    }
+}
+
+bool BitBangSPI::readPin(int line) {
+    if (line == miso_pin_) {
+        return gpiod_line_get_value(miso_line) == 1;
+    }
+    return false;
+}
+
+// 소멸자도 수정
+BitBangSPI::~BitBangSPI() {
+    if (gpio_initialized_) {
+        gpiod_line_release(mosi_line);
+        gpiod_line_release(miso_line);
+        gpiod_line_release(sclk_line);
+        gpiod_line_release(cs_line);
+        gpiod_chip_close(chip);
+        gpio_initialized_ = false;
+    }
+}
+
+
+#include <iostream>
+#include <fstream>
+#include <sstream>
+#include <string>
+#include <thread>
+#include <chrono>
+#include <vector>
+#include <unistd.h>
+
+class JetsonGPIO {
+public:
+    // 핀 모드 설정
+    static bool setup(int pin, bool isOutput) {
+        // GPIO 내보내기
+        std::ofstream exportFile("/sys/class/gpio/export");
+        if (!exportFile.is_open()) {
+            std::cerr << "Cannot open GPIO export file" << std::endl;
+            return false;
+        }
+        exportFile << pin;
+        exportFile.close();
+        
+        // 방향 설정
+        std::stringstream directionPath;
+        directionPath << "/sys/class/gpio/gpio" << pin << "/direction";
+        
+        // 약간의 지연을 통해 파일 생성 기다리기
+        usleep(100000);  // 100ms
+        
+        std::ofstream directionFile(directionPath.str());
+        if (!directionFile.is_open()) {
+            std::cerr << "Cannot open GPIO direction file for pin " << pin << std::endl;
+            return false;
+        }
+        directionFile << (isOutput ? "out" : "in");
+        directionFile.close();
+        
+        return true;
+    }
+    
+    // GPIO 값 설정
+    static bool output(int pin, bool value) {
+        std::stringstream valuePath;
+        valuePath << "/sys/class/gpio/gpio" << pin << "/value";
+        
+        std::ofstream valueFile(valuePath.str());
+        if (!valueFile.is_open()) {
+            std::cerr << "Cannot open GPIO value file for pin " << pin << std::endl;
+            return false;
+        }
+        valueFile << (value ? "1" : "0");
+        valueFile.close();
+        
+        return true;
+    }
+    
+    // GPIO 값 읽기
+    static bool input(int pin, bool& value) {
+        std::stringstream valuePath;
+        valuePath << "/sys/class/gpio/gpio" << pin << "/value";
+        
+        std::ifstream valueFile(valuePath.str());
+        if (!valueFile.is_open()) {
+            std::cerr << "Cannot open GPIO value file for pin " << pin << std::endl;
+            return false;
+        }
+        
+        char val;
+        valueFile >> val;
+        valueFile.close();
+        
+        value = (val == '1');
+        return true;
+    }
+    
+    // GPIO 정리
+    static bool cleanup(int pin) {
+        std::ofstream unexportFile("/sys/class/gpio/unexport");
+        if (!unexportFile.is_open()) {
+            std::cerr << "Cannot open GPIO unexport file" << std::endl;
+            return false;
+        }
+        unexportFile << pin;
+        unexportFile.close();
+        
+        return true;
+    }
+};
+
+class JetsonBitBangSPI {
+private:
+    int mosi_pin_;
+    int miso_pin_;
+    int sclk_pin_;
+    int cs_pin_;
+    
+    bool cpol_;
+    bool cpha_;
+    unsigned int delay_us_;
+    bool bit_order_lsb_;
+    
+    void delayMicroseconds(unsigned int us) {
+        std::this_thread::sleep_for(std::chrono::microseconds(us));
+    }
+    
+public:
+    JetsonBitBangSPI(int mosi_pin, int miso_pin, int sclk_pin, int cs_pin, 
+                   int mode = 0, unsigned int speed_hz = 1000000, bool bit_order_lsb = false)
+        : mosi_pin_(mosi_pin), miso_pin_(miso_pin), sclk_pin_(sclk_pin), cs_pin_(cs_pin),
+          bit_order_lsb_(bit_order_lsb) {
+        
+        // 모드에 따른 CPOL, CPHA 설정
+        cpol_ = (mode & 2) != 0;
+        cpha_ = (mode & 1) != 0;
+        
+        // 지연 시간 계산 (클럭 반주기)
+        delay_us_ = 500000 / speed_hz;
+        if (delay_us_ < 1) delay_us_ = 1;
+        
+        // GPIO 초기화
+        JetsonGPIO::setup(mosi_pin_, true);  // 출력
+        JetsonGPIO::setup(miso_pin_, false); // 입력
+        JetsonGPIO::setup(sclk_pin_, true);  // 출력
+        JetsonGPIO::setup(cs_pin_, true);    // 출력
+        
+        // 초기 상태 설정
+        JetsonGPIO::output(sclk_pin_, cpol_);
+        JetsonGPIO::output(cs_pin_, true);   // CS 비활성화
+    }
+    
+    ~JetsonBitBangSPI() {
+        // GPIO 정리
+        JetsonGPIO::cleanup(mosi_pin_);
+        JetsonGPIO::cleanup(miso_pin_);
+        JetsonGPIO::cleanup(sclk_pin_);
+        JetsonGPIO::cleanup(cs_pin_);
+    }
+    
+    // 단일 바이트 전송
+    uint8_t transfer(uint8_t data) {
+        uint8_t received = 0;
+        
+        for (int i = 0; i < 8; i++) {
+            int bit_pos = bit_order_lsb_ ? i : (7 - i);
+            bool bit_val = (data & (1 << bit_pos)) != 0;
+            
+            // MOSI에 비트 설정
+            JetsonGPIO::output(mosi_pin_, bit_val);
+            
+            // CPHA에 따른 클럭 에지 처리
+            if (cpha_) {
+                delayMicroseconds(delay_us_);
+                JetsonGPIO::output(sclk_pin_, !cpol_);
+                delayMicroseconds(delay_us_);
+                
+                // MISO에서 비트 읽기
+                bool bit_read = false;
+                JetsonGPIO::input(miso_pin_, bit_read);
+                if (bit_read) {
+                    received |= (1 << bit_pos);
+                }
+                
+                JetsonGPIO::output(sclk_pin_, cpol_);
+            } else {
+                delayMicroseconds(delay_us_);
+                JetsonGPIO::output(sclk_pin_, !cpol_);
+                
+                // MISO에서 비트 읽기
+                bool bit_read = false;
+                JetsonGPIO::input(miso_pin_, bit_read);
+                if (bit_read) {
+                    received |= (1 << bit_pos);
+                }
+                
+                delayMicroseconds(delay_us_);
+                JetsonGPIO::output(sclk_pin_, cpol_);
+            }
+        }
+        
+        return received;
+    }
+    
+    // 16비트 데이터 전송
+    uint16_t transfer16(uint16_t data) {
+        JetsonGPIO::output(cs_pin_, false);  // CS 활성화
+        
+        uint8_t msb = (data >> 8) & 0xFF;
+        uint8_t lsb = data & 0xFF;
+        
+        uint8_t msb_in = transfer(msb);
+        uint8_t lsb_in = transfer(lsb);
+        
+        JetsonGPIO::output(cs_pin_, true);   // CS 비활성화
+        
+        return ((uint16_t)msb_in << 8) | lsb_in;
+    }
+    
+    // 버퍼 전송
+    std::vector<uint8_t> transferBuffer(const std::vector<uint8_t>& data) {
+        std::vector<uint8_t> received(data.size());
+        
+        JetsonGPIO::output(cs_pin_, false);  // CS 활성화
+        
+        for (size_t i = 0; i < data.size(); i++) {
+            received[i] = transfer(data[i]);
+        }
+        
+        JetsonGPIO::output(cs_pin_, true);   // CS 비활성화
+        
+        return received;
+    }
+};
+
+
+
+ pnh_.param<int>("mosi_pin", mosi_pin_, 10); // 물리적 핀 7에 해당하는 GPIO 번호
+    pnh_.param<int>("miso_pin", miso_pin_, 9); // 물리적 핀 7에 해당하는 GPIO 번호
+    pnh_.param<int>("clk_pin", clk_pin_, 11); // 물리적 핀 7에 해당하는 GPIO 번호
+    pnh_.param<int>("ss0_pin", ss0_pin_, 8); // 물리적 핀 7에 해당하는 GPIO 번호
+    pnh_.param<int>("ss1_pin", ss1_pin_, 7); // 물리적 핀 7에 해당하는 GPIO 번호
+    pnh_.param<int>("reverse_pin", reverse_pin_, 194); // 물리적 핀 7에 해당하는 GPIO 번호
+    pnh_.param<int>("hall_sensor_pin", hall_sensor_pin_, 38); // 물리적 핀 13에 해당하는 GPIO 번호
+    pnh_.param<int>("inc_button_pin", inc_button_pin_, 23); // 물리적 핀 16에 해당하는 GPIO 번호
+    pnh_.param<int>("dec_button_pin", dec_button_pin_, 24); // 물리적 핀 18에 해당하는 GPIO 번호
+    pnh_.param<float>("max_speed", max_speed_, 100.0);
+    pnh_.param<std::string>("gpio_chip_name", gpio_chip_name_, "gpiochip0");
+
+
+안됨..
+
