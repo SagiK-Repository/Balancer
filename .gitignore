@@ -310,3 +310,6 @@ TestRecipe/Mirero.MLS.TestInferenceRecipe.Mask/Dll
 TestRecipe/Mirero.MLS.TestInferenceRecipe.Wafer/Dll
 TestRecipe/Mirero.MLS.TestModelRecipe.Mask/Dll
 TestRecipe/Mirero.MLS.TestModelRecipe.Wafer/Dll
+
+
+/*/build/

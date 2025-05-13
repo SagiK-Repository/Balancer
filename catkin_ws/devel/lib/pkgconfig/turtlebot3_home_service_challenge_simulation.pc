@@ -1,0 +1,8 @@
+prefix=/home/tbot3/catkin_ws/devel
+
+Name: turtlebot3_home_service_challenge_simulation
+Description: Description of turtlebot3_home_service_challenge_simulation
+Version: 0.0.1
+Cflags: 
+Libs: -L${prefix}/lib 
+Requires: 

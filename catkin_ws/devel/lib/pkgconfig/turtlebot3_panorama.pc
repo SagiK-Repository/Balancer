@@ -1,0 +1,8 @@
+prefix=/home/tbot3/catkin_ws/devel
+
+Name: turtlebot3_panorama
+Description: Description of turtlebot3_panorama
+Version: 1.1.0
+Cflags: -I/home/tbot3/catkin_ws/src/turtlebot3_applications/turtlebot3_panorama/include -I/usr/include -I/usr/include/opencv4
+Libs: -L${prefix}/lib /usr/lib/aarch64-linux-gnu/libboost_system.so /usr/lib/aarch64-linux-gnu/libopencv_calib3d.so.4.1.1 /usr/lib/aarch64-linux-gnu/libopencv_core.so.4.1.1 /usr/lib/aarch64-linux-gnu/libopencv_dnn.so.4.1.1 /usr/lib/aarch64-linux-gnu/libopencv_features2d.so.4.1.1 /usr/lib/aarch64-linux-gnu/libopencv_flann.so.4.1.1 /usr/lib/aarch64-linux-gnu/libopencv_gapi.so.4.1.1 /usr/lib/aarch64-linux-gnu/libopencv_highgui.so.4.1.1 /usr/lib/aarch64-linux-gnu/libopencv_imgcodecs.so.4.1.1 /usr/lib/aarch64-linux-gnu/libopencv_imgproc.so.4.1.1 /usr/lib/aarch64-linux-gnu/libopencv_ml.so.4.1.1 /usr/lib/aarch64-linux-gnu/libopencv_objdetect.so.4.1.1 /usr/lib/aarch64-linux-gnu/libopencv_photo.so.4.1.1 /usr/lib/aarch64-linux-gnu/libopencv_stitching.so.4.1.1 /usr/lib/aarch64-linux-gnu/libopencv_video.so.4.1.1 /usr/lib/aarch64-linux-gnu/libopencv_videoio.so.4.1.1
+Requires: roscpp rospy std_msgs std_srvs sensor_msgs geometry_msgs nav_msgs turtlebot3_applications_msgs cv_bridge image_transport cmake_modules

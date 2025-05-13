@@ -1,0 +1,8 @@
+prefix=/home/tbot3/catkin_ws/devel
+
+Name: motor_controller
+Description: Description of motor_controller
+Version: 0.0.0
+Cflags: -I/home/tbot3/catkin_ws/src/motor_controller/include
+Libs: -L${prefix}/lib -lmotor_controller
+Requires: roscpp rospy std_msgs
