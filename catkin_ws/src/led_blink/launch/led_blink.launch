@@ -1,0 +1,12 @@
+<launch>
+  <!-- LED 핀 번호 및 깜박임 주기 -->
+  <arg name="led_pin" default="18"/>
+  <arg name="blink_rate" default="1.0"/>
+  
+  <node name="led_blink" pkg="led_blink" type="led_blink_node" 
+output="screen">
+    <param name="led_pin" value="$(arg led_pin)"/>
+    <param name="blink_rate" value="$(arg blink_rate)"/>
+  </node>
+  
+</launch>

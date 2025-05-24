@@ -1,0 +1,2 @@
+- setup-file:
+    local-name: /home/tbot3/catkin_ws/devel/setup.sh
