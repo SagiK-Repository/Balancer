@@ -6,22 +6,10 @@
 #include <chrono>
 #include <iostream>
 #include <unistd.h>
-#include "gpiod.h"
 
-MCP4921::MCP4921(BitBangSPI* _spi, int cs)
-    : initialized_(false) {
-
-    cs_pin = cs;
-    // CS 사용 과정
-    chip = gpiod_chip_open("/dev/gpiochip0");
-    if (!chip) {ROS_ERROR("Failed to open GPIO chip");return;}
-    cs_line = gpiod_chip_get_line(chip, cs_pin);
-    if (!cs_line) {gpiod_chip_close(chip);ROS_ERROR("Failed to get GPIO lines");return;}
-    int ret = gpiod_line_request_output(cs_line, "spi_cs", 1);  // CS는 HIGH로 시작
-    if (ret < 0) {gpiod_chip_close(chip);ROS_ERROR("Failed to request CS GPIO line as output");return;}
-
-    spi = _spi;
-
+MCP4921::MCP4921(int mosi, int miso, int sck, int cs, uint32_t spi_speed)
+    : spi_(mosi, miso, sck, cs, BitBangSPI::MODE0, spi_speed,0), initialized_(false) {
+    
     initialized_ = true;//spi_.isOpen();
     
     if (initialized_) {
@@ -66,13 +54,7 @@ bool MCP4921::setOutput(uint16_t value, bool buffered, bool gain_1x, bool active
     tx_data[0] = (command >> 8) & 0xFF; // 상위 바이트
     tx_data[1] = command & 0xFF; // 하위 바이트
     
-    // Chip Select 활성화 (LOW)
-    gpiod_line_set_value(cs_line, false);
-
-    int ret = spi->transfer16(command);
-
-    // Chip Select 비활성화 (HIGH)
-    gpiod_line_set_value(cs_line, true);
+    int ret = spi_.transfer16(command);
     
     return (ret > 0);
 }

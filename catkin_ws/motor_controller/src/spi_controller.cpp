@@ -33,6 +33,7 @@ public:
     int mosi_pin;
     int miso_pin;
     int sclk_pin;
+    int cs_pin;
     int cpol;
 
     ~GPIOController() {
@@ -40,17 +41,19 @@ public:
             gpiod_line_release(mosi_line);
             gpiod_line_release(miso_line);
             gpiod_line_release(sclk_line);
+            gpiod_line_release(cs_line);
             gpiod_chip_close(chip);
             initialized_ = false;
         }
     }
 
-    bool init(int mosi_pin_,int miso_pin_,int sclk_pin_, int cpol_) {
+    bool init(int mosi_pin_,int miso_pin_,int sclk_pin_,int cs_pin_, int cpol_) {
         if (initialized_) return true;
 
         mosi_pin = mosi_pin_;
         miso_pin = miso_pin_;
         sclk_pin = sclk_pin_;
+        cs_pin = cs_pin_;
         cpol = cpol_;
         // gpiochip0 열기
         chip = gpiod_chip_open("/dev/gpiochip0");
@@ -63,8 +66,9 @@ public:
         mosi_line = gpiod_chip_get_line(chip, mosi_pin);
         miso_line = gpiod_chip_get_line(chip, miso_pin);
         sclk_line = gpiod_chip_get_line(chip, sclk_pin);
+        cs_line = gpiod_chip_get_line(chip, cs_pin);
 
-        if (!mosi_line || !miso_line || !sclk_line) {
+        if (!mosi_line || !miso_line || !sclk_line || !cs_line) {
             gpiod_chip_close(chip);
             ROS_ERROR("Failed to get GPIO lines");
         }
@@ -91,6 +95,15 @@ public:
             ROS_ERROR("Failed to request SCLK GPIO line as output");
         }
 
+        ret = gpiod_line_request_output(cs_line, "spi_cs", 1);  // CS는 HIGH로 시작
+        if (ret < 0) {
+            gpiod_line_release(mosi_line);
+            gpiod_line_release(miso_line);
+            gpiod_line_release(sclk_line);
+            gpiod_chip_close(chip);
+            ROS_ERROR("Failed to request CS GPIO line as output");
+        }
+
         initialized_ = true;
         return true;
     }
@@ -106,6 +119,8 @@ public:
             gpiod_line_set_value(mosi_line, value ? 1 : 0);
         } else if (line == sclk_pin) {
             gpiod_line_set_value(sclk_line, value ? 1 : 0);
+        } else if (line == cs_pin) {
+            gpiod_line_set_value(cs_line, value ? 1 : 0);
         }
     }
 
@@ -132,16 +147,13 @@ private:
     struct gpiod_line* mosi_line;
     struct gpiod_line* miso_line;
     struct gpiod_line* sclk_line;
+    struct gpiod_line* cs_line;
     
 };
 
-BitBangSPI::BitBangSPI(){
-    return ;
-}
-
-BitBangSPI::BitBangSPI(int mosi_pin, int miso_pin, int sclk_pin,
+BitBangSPI::BitBangSPI(int mosi_pin, int miso_pin, int sclk_pin, int cs_pin,
                        SPIMode mode, uint32_t max_speed_hz, bool bit_order_lsb)
-    : mosi_pin_(mosi_pin), miso_pin_(miso_pin), sclk_pin_(sclk_pin),
+    : mosi_pin_(mosi_pin), miso_pin_(miso_pin), sclk_pin_(sclk_pin), cs_pin_(cs_pin),
       mode_(mode), max_speed_hz_(max_speed_hz), bit_order_lsb_(bit_order_lsb),
       gpio_initialized_(false) {
     
@@ -160,7 +172,7 @@ BitBangSPI::~BitBangSPI() {
 
 void BitBangSPI::initGPIO() {
     auto& gpio = GPIOController::getInstance();
-    if (!gpio.init(mosi_pin_,miso_pin_,sclk_pin_,cpol_)) {
+    if (!gpio.init(mosi_pin_,miso_pin_,sclk_pin_,cs_pin_,cpol_)) {
         ROS_ERROR("Failed to initialize GPIO");
     }
     
@@ -168,9 +180,11 @@ void BitBangSPI::initGPIO() {
     gpio.setDirection(mosi_pin_, true);  // 출력
     gpio.setDirection(miso_pin_, false); // 입력
     gpio.setDirection(sclk_pin_, true);  // 출력
+    gpio.setDirection(cs_pin_, true);    // 출력
     
     // 초기 상태 설정
     gpio.writePin(sclk_pin_, cpol_);  // CPOL에 따른 초기 클럭 레벨
+    gpio.writePin(cs_pin_, true);     // CS는 기본적으로 비활성화(HIGH)
     
     gpio_initialized_ = true;
 }
@@ -190,7 +204,7 @@ uint8_t BitBangSPI::transfer(uint8_t data_out) {
     
     // 반 클럭 주기 계산 (마이크로초)
     unsigned int half_period_us = 500000 / max_speed_hz_;
-    if (half_period_us < 1) half_period_us = 0;
+    if (half_period_us < 1) half_period_us = 1;
     
     // 비트별 처리
     for (int i = 0; i < 8; i++) {
@@ -234,6 +248,9 @@ uint8_t BitBangSPI::transfer(uint8_t data_out) {
 uint16_t BitBangSPI::transfer16(uint16_t data_out) {
     uint16_t data_in = 0;
     
+    // Chip Select 활성화 (LOW)
+    setCS(false);
+    
     // MSB 우선 전송의 경우 (일반적인 SPI)
     if (!bit_order_lsb_) {
         // 상위 바이트 먼저 전송
@@ -255,6 +272,8 @@ uint16_t BitBangSPI::transfer16(uint16_t data_out) {
         data_in = (static_cast<uint16_t>(msb_in) << 8) | lsb_in;
     }
     
+    // Chip Select 비활성화 (HIGH)
+    setCS(true);
     
     return data_in;
 }
@@ -262,10 +281,16 @@ uint16_t BitBangSPI::transfer16(uint16_t data_out) {
 std::vector<uint8_t> BitBangSPI::transferBuffer(const std::vector<uint8_t>& data_out) {
     std::vector<uint8_t> data_in(data_out.size());
     
+    // Chip Select 활성화 (LOW)
+    setCS(false);
+    
     // 각 바이트 전송
     for (size_t i = 0; i < data_out.size(); i++) {
         data_in[i] = transfer(data_out[i]);
     }
+    
+    // Chip Select 비활성화 (HIGH)
+    setCS(true);
     
     return data_in;
 }
@@ -284,4 +309,11 @@ void BitBangSPI::setMode(SPIMode mode) {
 
 void BitBangSPI::setMaxSpeed(uint32_t speed_hz) {
     max_speed_hz_ = speed_hz;
+}
+
+void BitBangSPI::setCS(bool level) {
+    if (gpio_initialized_) {
+        auto& gpio = GPIOController::getInstance();
+        gpio.writePin(cs_pin_, level);
+    }
 }
