@@ -20,14 +20,15 @@ public:
      * @param mosi_pin MOSI GPIO 핀 번호 (BCM 번호 체계)
      * @param miso_pin MISO GPIO 핀 번호
      * @param sclk_pin SCLK GPIO 핀 번호
+     * @param cs_pin CS GPIO 핀 번호
      * @param mode SPI 모드 (0-3)
      * @param max_speed_hz 최대 클럭 속도 (Hz)
      * @param bit_order 비트 순서 (true=LSB 먼저, false=MSB 먼저)
      */
-    BitBangSPI(int mosi_pin, int miso_pin, int sclk_pin,
+    BitBangSPI(int mosi_pin, int miso_pin, int sclk_pin, int cs_pin,
                SPIMode mode = MODE0, uint32_t max_speed_hz = 1000000,
                bool bit_order_lsb = false);
-    BitBangSPI();
+
     // 소멸자
     ~BitBangSPI();
 
@@ -64,11 +65,18 @@ public:
      */
     void setMaxSpeed(uint32_t speed_hz);
 
+    /**
+     * CS 핀 수동 제어
+     * @param level 핀 레벨 (true=HIGH, false=LOW)
+     */
+    void setCS(bool level);
+
 private:
     // GPIO 핀 번호
     int mosi_pin_;
     int miso_pin_;
     int sclk_pin_;
+    int cs_pin_;
     
     // SPI 설정
     SPIMode mode_;

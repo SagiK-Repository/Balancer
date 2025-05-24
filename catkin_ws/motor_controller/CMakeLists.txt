@@ -9,14 +9,11 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 ## if COMPONENTS list like find_package(catkin REQUIRED COMPONENTS xyz)
 ## is used, also find other catkin packages
 find_package(catkin REQUIRED COMPONENTS
-  rospy
   roscpp
+  rospy
   std_msgs
-  nav_msgs
-  geometry_msgs
-  tf2
-  tf2_geometry_msgs
 )
+
 ## System dependencies are found with CMake's conventions
 # find_package(Boost REQUIRED COMPONENTS system)
 
@@ -137,14 +134,6 @@ add_library(spi_controller
   src/spi_controller.cpp
 )
 
-add_library(i2c_controller
-  src/i2c_controller.cpp
-)
-
-add_library(HallSensorEncoder
-  src/HallSensorEncoder.cpp
-)
-
 
 ## Add cmake target dependencies of the library
 ## as an example, code may need to be generated before libraries
@@ -186,8 +175,6 @@ target_link_libraries(${PROJECT_NAME}_node
   motor_controller
   mcp4921
   spi_controller
-  i2c_controller
-  HallSensorEncoder
   pthread
   rt
   gpiod
@@ -230,11 +217,12 @@ install(DIRECTORY include/${PROJECT_NAME}/
 )
 
 # 라이브러리 설치
-install(TARGETS spi_controller i2c_controller mcp4921 HallSensorEncoder motor_controller
+install(TARGETS spi_controller mcp4921 motor_controller
   ARCHIVE DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
   LIBRARY DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
   RUNTIME DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION} 
 )
+
 # 실행 파일 설치 
 install(TARGETS motor_controller_node
   RUNTIME DESTINATION ${CATKIN_GLOBAL_BIN_DESTINATION}
