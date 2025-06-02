@@ -1,0 +1,5 @@
+(sym_lib_table
+  (version 7)
+  (lib (name "BAT8")(type "KiCad")(uri "${KIPRJMOD}/library/ul_BK-18650-PC8/KiCADv6/2025-06-02_00-29-30.kicad_sym")(options "")(descr ""))
+  (lib (name "BAT4")(type "KiCad")(uri "${KIPRJMOD}/library/ul_BK-18650-PC4/KiCADv6/2025-06-02_00-40-05.kicad_sym")(options "")(descr ""))
+)
