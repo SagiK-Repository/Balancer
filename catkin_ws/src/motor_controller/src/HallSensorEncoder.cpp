@@ -140,7 +140,7 @@ bool HallSensorEncoder::updateWheelState(WheelInfo& wheel_info, WheelState& whee
     } else {
         // 시퀀스 오류 - 스텝을 건너뛰었거나 노이즈
         // 새로운 인덱스로 강제 업데이트하지만 카운트는 증가시키지 않음
-        ROS_ERROR("step");
+        //ROS_ERROR("step");
         wheel_state.sequence_index = new_index;
         wheel_info.is_valid = false;
         return false;
