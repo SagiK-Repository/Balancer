@@ -571,7 +571,7 @@ void HallSensorEncoder::updateHallSensors(int wheel0_hall, int wheel1_hall) {
 
 SPIHardwareNode::SPIHardwareNode(ros::NodeHandle& nh, ros::NodeHandle& pnh)
     : nh_(nh), pnh_(pnh),
-      dac0_(nullptr), dac1_(nullptr), chip_(nullptr),
+      dac0_(nullptr), dac1_(nullptr), spi_(nullptr), chip_(nullptr),
       reverse0_line_(nullptr), reverse1_line_(nullptr),
       inc_button_line_(nullptr), dec_button_line_(nullptr), latch_line_(nullptr),
       hall_state_0_(0), hall_state_1_(0),
@@ -579,7 +579,7 @@ SPIHardwareNode::SPIHardwareNode(ros::NodeHandle& nh, ros::NodeHandle& pnh)
       motor0_speed_(0.0), motor1_speed_(0.0),
       prev_inc_button_state_(false), prev_dec_button_state_(false),
       hardware_initialized_(false), last_error_(HardwareError::NONE),
-      encoder_(HardwareConstants::WHEEL_RADIUS, HardwareConstants::WHEEL_DISTANCE, 999) {
+      encoder_(HardwareConstants::WHEEL_RADIUS, HardwareConstants::WHEEL_DISTANCE, 10.0) {
     
     // 기본 모터 명령 초기화
     current_command_.motor0_output = 0.0;

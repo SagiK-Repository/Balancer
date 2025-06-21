@@ -196,7 +196,7 @@ private:
     GPIOPinConfig pin_config_;
     MCP4921* dac0_;
     MCP4921* dac1_;
-    BitBangSPI spi_;
+    BitBangSPI* spi_;
     HallSensorEncoder encoder_;
     
     // GPIO 관련

@@ -121,6 +121,8 @@ std::string hardwareErrorToString(HardwareError error) {
             return "DAC 초기화 실패";
         case HardwareError::I2C_INIT_FAILED:
             return "I2C 초기화 실패";
+        case HardwareError::I2C_READ_FAILED:
+            return "I2C 읽기 실패";
         case HardwareError::SENSOR_READ_FAILED:
             return "센서 읽기 실패";
         case HardwareError::COMMUNICATION_TIMEOUT:
