@@ -11,9 +11,27 @@ cd ~/catkin_ws
 catkin_make
 source devel/setup.bash
 ```
+```bash
+# 개별 전송
+scp -r catkin_ws/src/motor_controller/src tbot3@192.168.0.28:~/catkin_ws/src/motor_controller/
+scp -r catkin_ws/src/motor_controller/include tbot3@192.168.0.28:~/catkin_ws/src/motor_controller/
+scp -r catkin_ws/src/motor_controller/launch tbot3@192.168.0.28:~/catkin_ws/src/motor_controller/
+scp -r catkin_ws/src/motor_controller/scripts tbot3@192.168.0.28:~/catkin_ws/src/motor_controller/
+
+scp catkin_ws/src/motor_controller/CMakeLists.txt tbot3@192.168.0.28:~/catkin_ws/src/motor_controller/
+scp catkin_ws/src/motor_controller/package.xml tbot3@192.168.0.28:~/catkin_ws/src/motor_controller/
+
+# 방법 5: rsync 사용 (변경된 파일만 동기화)
+rsync -avz --include='src/' --include='include/' --include='launch/' --include='scripts/' --include='CMakeLists.txt' --include='package.xml' --exclude='*' catkin_ws/src/motor_controller/ tbot3@192.168.0.28:~/catkin_ws/src/motor_controller/
+```
 
 ### 2. 모터 컨트롤러 실행
+```powershell
+ssh tbot3@192.168.0.28
+```
 ```bash
+cd ~/catkin_ws
+source devel/setup.bash
 roslaunch motor_controller motor_controller.launch
 ```
 

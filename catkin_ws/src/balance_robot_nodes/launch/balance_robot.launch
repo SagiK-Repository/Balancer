@@ -1,0 +1,82 @@
+<?xml version="1.0"?>
+<!-- 밸런싱 로봇 메인 런치 파일 -->
+<launch>
+  <!-- 인수 정의 -->
+  <arg name="config_file" default="$(find balance_robot_nodes)/config/balance_robot_params.yaml" />
+  <arg name="enable_hardware" default="true" />
+  <arg name="enable_sensors" default="true" />
+  <arg name="enable_controller" default="true" />
+  <arg name="enable_visualization" default="false" />
+  <arg name="log_level" default="INFO" />
+  
+  <!-- 매개변수 로드 -->
+  <rosparam file="$(arg config_file)" command="load" />
+  
+  <!-- SPI Hardware Node -->
+  <group if="$(arg enable_hardware)">
+    <node name="spi_hardware_node" pkg="balance_robot_nodes" type="spi_hardware_node" output="screen">
+      <param name="log_level" value="$(arg log_level)" />
+      <remap from="motor_command" to="/balance_robot/motor_command" />
+      <remap from="motor_status" to="/balance_robot/motor_status" />
+      <remap from="motor0_speed" to="/balance_robot/motor0_speed" />
+      <remap from="motor1_speed" to="/balance_robot/motor1_speed" />
+    </node>
+  </group>
+  
+  <!-- I2C Sensor Node -->
+  <group if="$(arg enable_sensors)">
+    <node name="i2c_sensor_node" pkg="balance_robot_nodes" type="i2c_sensor_node" output="screen">
+      <param name="log_level" value="$(arg log_level)" />
+      <remap from="sensor_data" to="/balance_robot/sensor_data" />
+      <remap from="imu/data" to="/balance_robot/imu/data" />
+      <remap from="imu/temperature" to="/balance_robot/imu/temperature" />
+      <remap from="sensor_roll" to="/balance_robot/sensor_roll" />
+      <remap from="sensor_pitch" to="/balance_robot/sensor_pitch" />
+      <remap from="sensor_confidence" to="/balance_robot/sensor_confidence" />
+    </node>
+  </group>
+  
+  <!-- Balance Controller Node -->
+  <group if="$(arg enable_controller)">
+    <node name="balance_controller_node" pkg="balance_robot_nodes" type="balance_controller_node" output="screen">
+      <param name="log_level" value="$(arg log_level)" />
+      <remap from="motor_status" to="/balance_robot/motor_status" />
+      <remap from="sensor_data" to="/balance_robot/sensor_data" />
+      <remap from="motor_command" to="/balance_robot/motor_command" />
+      <remap from="controller_status" to="/balance_robot/controller_status" />
+      <remap from="system_ready" to="/balance_robot/system_ready" />
+      <remap from="target_speed0" to="/balance_robot/target_speed0" />
+      <remap from="target_speed1" to="/balance_robot/target_speed1" />
+      <remap from="cmd_vel" to="/balance_robot/cmd_vel" />
+      <remap from="emergency_stop" to="/balance_robot/emergency_stop" />
+    </node>
+  </group>
+  
+  <!-- 시각화 도구 (옵션) -->
+  <group if="$(arg enable_visualization)">
+    <!-- RViz -->
+    <node name="rviz" pkg="rviz" type="rviz" 
+          args="-d $(find balance_robot_nodes)/config/balance_robot.rviz" 
+          output="screen" />
+    
+    <!-- rqt_plot으로 실시간 데이터 모니터링 -->
+    <node name="rqt_plot_motors" pkg="rqt_plot" type="rqt_plot" 
+          args="/balance_robot/motor0_speed/data /balance_robot/motor1_speed/data" />
+    
+    <node name="rqt_plot_sensors" pkg="rqt_plot" type="rqt_plot" 
+          args="/balance_robot/sensor_roll/data /balance_robot/sensor_pitch/data" />
+  </group>
+  
+  <!-- 진단 노드 -->
+  <node name="robot_state_publisher" pkg="robot_state_publisher" type="robot_state_publisher" />
+  
+  <!-- 원격 제어를 위한 joy 노드 (옵션) -->
+  <node name="joy_node" pkg="joy" type="joy_node" output="screen" />
+  <node name="teleop_twist_joy" pkg="teleop_twist_joy" type="teleop_node" output="screen">
+    <remap from="cmd_vel" to="/balance_robot/cmd_vel" />
+  </node>
+  
+  <!-- 로그 설정 -->
+  <env name="ROSCONSOLE_CONFIG_FILE" value="$(find balance_robot_nodes)/config/custom_rosconsole.conf"/>
+  
+</launch> 

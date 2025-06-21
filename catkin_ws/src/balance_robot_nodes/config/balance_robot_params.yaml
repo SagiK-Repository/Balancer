@@ -1,0 +1,108 @@
+# 밸런싱 로봇 기본 매개변수 설정
+# Balance Robot Default Parameters
+
+# SPI Hardware Node 설정
+spi_hardware_node:
+  # SPI 설정
+  spi_device: "/dev/spidev0.0"
+  spi_speed: 100000000  # 100MHz
+  spi_mode: 0
+  
+  # GPIO 핀 설정
+  reverse0_pin: 23      # 모터0 방향 제어
+  reverse1_pin: 24      # 모터1 방향 제어
+  inc_button_pin: 5     # 증가 버튼
+  dec_button_pin: 6     # 감소 버튼
+  latch_pin: 18         # SPI 래치 신호
+  
+  # DAC 설정
+  dac0_channel: 0       # 모터0 DAC 채널
+  dac1_channel: 1       # 모터1 DAC 채널
+  dac_max_voltage: 5.0  # 최대 출력 전압
+  
+  # 제어 주기 설정
+  control_frequency: 500.0    # 제어 주기 (Hz)
+  sensor_frequency: 10000.0   # 센서 읽기 주기 (Hz)
+  button_frequency: 50.0      # 버튼 체크 주기 (Hz)
+  
+  # 모터 매개변수
+  motor_max_rpm: 3000.0       # 최대 RPM
+  hall_counts_per_rev: 120    # 회전당 홀센서 카운트
+
+# I2C Sensor Node 설정
+i2c_sensor_node:
+  # 필터 설정
+  filter_enabled: true
+  filter_alpha: 0.3
+  use_complementary_filter: true
+  complementary_alpha: 0.02
+  
+  # 안정성 판단 설정
+  stability_threshold: 0.5    # 자이로 크기 임계값 (rad/s)
+  confidence_threshold: 70.0  # 신뢰도 임계값 (%)
+  
+  # 센서 보정값 (필요시 조정)
+  accel_offset_x: 0.0
+  accel_offset_y: 0.0
+  accel_offset_z: 0.0
+  gyro_offset_x: 0.0
+  gyro_offset_y: 0.0
+  gyro_offset_z: 0.0
+
+# Balance Controller Node 설정
+balance_controller_node:
+  # 제어 모드 설정
+  use_pid_control: true
+  use_balance_control: false    # 밸런싱 기능 (일단 비활성화)
+  use_smooth_control: true
+  
+  # 기본 제어 매개변수
+  max_speed: 100.0              # 최대 속도 (%)
+  control_frequency: 500.0      # 제어 주기 (Hz)
+  status_frequency: 10.0        # 상태 발행 주기 (Hz)
+  target_roll_angle: 0.0        # 목표 Roll 각도 (도)
+  
+  # 타임아웃 설정
+  motor_status_timeout: 0.1     # 모터 상태 타임아웃 (초)
+  sensor_data_timeout: 0.1      # 센서 데이터 타임아웃 (초)
+  
+  # PID 게인 - 모터 속도 제어
+  pid_kp_motor0: 2.0
+  pid_ki_motor0: 0.5
+  pid_kd_motor0: 0.1
+  pid_kp_motor1: 2.0
+  pid_ki_motor1: 0.5
+  pid_kd_motor1: 0.1
+  
+  # PID 게인 - 밸런싱 제어
+  pid_kp_balance: 15.0
+  pid_ki_balance: 2.0
+  pid_kd_balance: 0.5
+  
+  # 부드러운 제어 설정
+  smooth_max_acceleration: 30.0  # 최대 가속도 (%/s)
+  smooth_max_deceleration: 60.0  # 최대 감속도 (%/s)
+  smooth_velocity_filter: 0.4    # 속도 필터 계수
+  smooth_output_filter: 0.6      # 출력 필터 계수
+  
+  # 데드존 보상 설정
+  motor_deadzone: 5.0            # 데드존 임계값 (%)
+  deadzone_compensation: 8.0     # 보상값 (%)
+  
+  # 방향 전환 제어 설정
+  brake_zone_threshold: 10.0     # 브레이크 구간 임계값 (%)
+  brake_duration: 0.1            # 브레이크 지속 시간 (초)
+
+# 로봇 물리적 매개변수
+robot_params:
+  wheel_radius: 0.142           # 바퀴 반지름 (m)
+  wheel_base: 0.375             # 바퀴 간 거리 (m)
+  robot_mass: 5.0               # 로봇 질량 (kg)
+  robot_height: 0.6             # 로봇 높이 (m)
+
+# 진단 및 모니터링 설정
+diagnostics:
+  enable_diagnostics: true
+  diagnostic_frequency: 1.0     # 진단 주기 (Hz)
+  log_level: "INFO"             # 로그 레벨 (DEBUG, INFO, WARN, ERROR)
+  enable_data_recording: false  # 데이터 기록 활성화 

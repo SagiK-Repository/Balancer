@@ -218,7 +218,7 @@ MotorController::MotorController(ros::NodeHandle& nh, ros::NodeHandle& pnh)
     sensor_confidence_pub_ = nh_.advertise<std_msgs::Float32>("sensor_confidence", 10);
     
     // 타이머 설정
-    timer0_ = nh_.createTimer(ros::Duration(0.05), &MotorController::timerCallback, this);
+    timer0_ = nh_.createTimer(ros::Duration(0.002), &MotorController::timerCallback, this);
     
     timer1_ = nh_.createTimer(ros::Duration(0.0001), &MotorController::checkHallSensor, this);
     
@@ -755,8 +755,8 @@ double MotorController::applyDirectionChangeControl(double output, int motor_id)
         // 브레이킹 시작
         is_braking = true;
         brake_start_time = current_time;
-        ROS_INFO("Motor %d: Direction change detected, starting brake (%.1f -> %.1f)", 
-                 motor_id, prev_output, output);
+        /*ROS_INFO("Motor %d: Direction change detected, starting brake (%.1f -> %.1f)", 
+                 motor_id, prev_output, output);*/
         
         // 이전 출력값 업데이트
         if (motor_id == 0) prev_output_0_ = output;
@@ -775,7 +775,7 @@ double MotorController::applyDirectionChangeControl(double output, int motor_id)
         } else {
             // 브레이킹 종료
             is_braking = false;
-            ROS_INFO("Motor %d: Brake finished, resuming with output %.1f", motor_id, output);
+            //ROS_INFO("Motor %d: Brake finished, resuming with output %.1f", motor_id, output);
         }
     }
     

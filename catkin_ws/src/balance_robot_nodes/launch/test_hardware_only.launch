@@ -1,0 +1,23 @@
+<?xml version="1.0"?>
+<!-- 하드웨어 테스트 전용 런치 파일 -->
+<launch>
+  <!-- 매개변수 로드 -->
+  <rosparam file="$(find balance_robot_nodes)/config/balance_robot_params.yaml" command="load" />
+  
+  <!-- SPI Hardware Node만 실행 -->
+  <node name="spi_hardware_node" pkg="balance_robot_nodes" type="spi_hardware_node" output="screen">
+    <param name="log_level" value="DEBUG" />
+  </node>
+  
+  <!-- 수동 모터 제어를 위한 테스트 퍼블리셔 -->
+  <node name="test_motor_publisher" pkg="rostopic" type="rostopic" 
+        args="pub -r 10 /motor_command balance_robot_nodes/MotorCommand 
+        '{header: {stamp: now, frame_id: base_link}, 
+         motor0_output: 0.0, motor1_output: 0.0, 
+         motor0_direction: true, motor1_direction: true, 
+         control_mode: 0, emergency_stop: false}'" />
+  
+  <!-- 모터 상태 모니터링 -->
+  <node name="motor_status_echo" pkg="rostopic" type="rostopic" args="echo /motor_status" />
+  
+</launch> 
