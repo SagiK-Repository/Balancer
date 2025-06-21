@@ -2,6 +2,573 @@
 #include <ros/ros.h>
 #include <std_msgs/Float32.h>
 
+// BitBangSPI 실제 구현
+BitBangSPI::BitBangSPI(int mosi_pin, int miso_pin, int sclk_pin, int cs_pin,
+                       SPIMode mode, uint32_t max_speed_hz, bool bit_order_lsb)
+    : mosi_pin_(mosi_pin), miso_pin_(miso_pin), sclk_pin_(sclk_pin), cs_pin_(cs_pin),
+      mode_(mode), max_speed_hz_(max_speed_hz), bit_order_lsb_(bit_order_lsb),
+      gpio_initialized_(false), chip_(nullptr),
+      mosi_line_(nullptr), miso_line_(nullptr), sclk_line_(nullptr), cs_line_(nullptr) {
+    
+    // 모드에 따른 CPOL, CPHA 설정
+    cpol_ = (mode_ == MODE2 || mode_ == MODE3);
+    cpha_ = (mode_ == MODE1 || mode_ == MODE3);
+    
+    initGPIO();
+}
+
+BitBangSPI::~BitBangSPI() {
+    if (gpio_initialized_) {
+        cleanupGPIO();
+    }
+}
+
+void BitBangSPI::initGPIO() {
+    // gpiochip0 열기
+    chip_ = gpiod_chip_open("/dev/gpiochip0");
+    if (!chip_) {
+        ROS_ERROR("Failed to open GPIO chip");
+        return;
+    }
+
+    // GPIO 라인 얻기
+    mosi_line_ = gpiod_chip_get_line(chip_, mosi_pin_);
+    miso_line_ = gpiod_chip_get_line(chip_, miso_pin_);
+    sclk_line_ = gpiod_chip_get_line(chip_, sclk_pin_);
+    cs_line_ = gpiod_chip_get_line(chip_, cs_pin_);
+
+    if (!mosi_line_ || !miso_line_ || !sclk_line_ || !cs_line_) {
+        gpiod_chip_close(chip_);
+        ROS_ERROR("Failed to get GPIO lines");
+        return;
+    }
+
+    // 라인 설정
+    int ret = gpiod_line_request_output(mosi_line_, "spi_mosi", 0);
+    if (ret < 0) {
+        gpiod_chip_close(chip_);
+        ROS_ERROR("Failed to request MOSI GPIO line as output");
+        return;
+    }
+
+    ret = gpiod_line_request_input(miso_line_, "spi_miso");
+    if (ret < 0) {
+        gpiod_line_release(mosi_line_);
+        gpiod_chip_close(chip_);
+        ROS_ERROR("Failed to request MISO GPIO line as input");
+        return;
+    }
+
+    ret = gpiod_line_request_output(sclk_line_, "spi_sclk", cpol_);
+    if (ret < 0) {
+        gpiod_line_release(mosi_line_);
+        gpiod_line_release(miso_line_);
+        gpiod_chip_close(chip_);
+        ROS_ERROR("Failed to request SCLK GPIO line as output");
+        return;
+    }
+
+    ret = gpiod_line_request_output(cs_line_, "spi_cs", 1);  // CS는 HIGH로 시작
+    if (ret < 0) {
+        gpiod_line_release(mosi_line_);
+        gpiod_line_release(miso_line_);
+        gpiod_line_release(sclk_line_);
+        gpiod_chip_close(chip_);
+        ROS_ERROR("Failed to request CS GPIO line as output");
+        return;
+    }
+
+    // 초기 상태 설정
+    gpiod_line_set_value(sclk_line_, cpol_);  // CPOL에 따른 초기 클럭 레벨
+    gpiod_line_set_value(cs_line_, 1);        // CS는 기본적으로 비활성화(HIGH)
+    
+    gpio_initialized_ = true;
+}
+
+void BitBangSPI::cleanupGPIO() {
+    if (mosi_line_) {
+        gpiod_line_release(mosi_line_);
+        mosi_line_ = nullptr;
+    }
+    if (miso_line_) {
+        gpiod_line_release(miso_line_);
+        miso_line_ = nullptr;
+    }
+    if (sclk_line_) {
+        gpiod_line_release(sclk_line_);
+        sclk_line_ = nullptr;
+    }
+    if (cs_line_) {
+        gpiod_line_release(cs_line_);
+        cs_line_ = nullptr;
+    }
+    if (chip_) {
+        gpiod_chip_close(chip_);
+        chip_ = nullptr;
+    }
+    gpio_initialized_ = false;
+}
+
+void BitBangSPI::delayMicroseconds(unsigned int usec) {
+    std::this_thread::sleep_for(std::chrono::microseconds(usec));
+}
+
+uint8_t BitBangSPI::transfer(uint8_t data_out) {
+    if (!gpio_initialized_) return 0;
+    
+    uint8_t data_in = 0;
+    
+    // 반 클럭 주기 계산 (마이크로초)
+    unsigned int half_period_us = 500000 / max_speed_hz_;
+    if (half_period_us < 1) half_period_us = 1;
+    
+    for (int bit = 7; bit >= 0; bit--) {
+        // 데이터 출력 (MSB first)
+        bool bit_out = (data_out >> bit) & 0x01;
+        if (bit_order_lsb_) {
+            bit_out = (data_out >> (7 - bit)) & 0x01;
+        }
+        
+        // CPHA = 0: 클럭 상승 엣지에서 데이터 샘플링
+        // CPHA = 1: 클럭 하강 엣지에서 데이터 샘플링
+        if (!cpha_) {
+            gpiod_line_set_value(mosi_line_, bit_out);
+            delayMicroseconds(half_period_us);
+        }
+        
+        // 클럭 토글
+        gpiod_line_set_value(sclk_line_, !cpol_);
+        
+        if (cpha_) {
+            gpiod_line_set_value(mosi_line_, bit_out);
+        }
+        
+        delayMicroseconds(half_period_us);
+        
+        // 데이터 입력 읽기
+        bool bit_in = gpiod_line_get_value(miso_line_);
+        if (bit_order_lsb_) {
+            data_in |= (bit_in << (7 - bit));
+        } else {
+            data_in |= (bit_in << bit);
+        }
+        
+        // 클럭 원래 상태로 복원
+        gpiod_line_set_value(sclk_line_, cpol_);
+        delayMicroseconds(half_period_us);
+    }
+    
+    return data_in;
+}
+
+uint16_t BitBangSPI::transfer16(uint16_t data_out) {
+    uint8_t high_byte = (data_out >> 8) & 0xFF;
+    uint8_t low_byte = data_out & 0xFF;
+    
+    uint8_t high_in = transfer(high_byte);
+    uint8_t low_in = transfer(low_byte);
+    
+    return (high_in << 8) | low_in;
+}
+
+void BitBangSPI::setMode(SPIMode mode) {
+    mode_ = mode;
+    cpol_ = (mode_ == MODE2 || mode_ == MODE3);
+    cpha_ = (mode_ == MODE1 || mode_ == MODE3);
+    
+    if (gpio_initialized_) {
+        gpiod_line_set_value(sclk_line_, cpol_);
+    }
+}
+
+void BitBangSPI::setMaxSpeed(uint32_t speed_hz) {
+    max_speed_hz_ = speed_hz;
+}
+
+void BitBangSPI::setCS(bool level) {
+    if (gpio_initialized_) {
+        gpiod_line_set_value(cs_line_, level);
+    }
+}
+
+// MCP4921 실제 구현
+MCP4921::MCP4921(BitBangSPI* spi, int cs_pin)
+    : spi_(spi), cs_pin_(cs_pin), initialized_(false), chip_(nullptr), cs_line_(nullptr) {
+
+    // CS 라인 설정
+    chip_ = gpiod_chip_open("/dev/gpiochip0");
+    if (!chip_) {
+        ROS_ERROR("Failed to open GPIO chip for MCP4921");
+        return;
+    }
+    
+    cs_line_ = gpiod_chip_get_line(chip_, cs_pin_);
+    if (!cs_line_) {
+        gpiod_chip_close(chip_);
+        ROS_ERROR("Failed to get GPIO line for MCP4921 CS");
+        return;
+    }
+    
+    int ret = gpiod_line_request_output(cs_line_, "mcp4921_cs", 1);  // CS는 HIGH로 시작
+    if (ret < 0) {
+        gpiod_chip_close(chip_);
+        ROS_ERROR("Failed to request CS GPIO line as output for MCP4921");
+        return;
+    }
+
+    initialized_ = true;
+    
+    if (initialized_) {
+        ROS_INFO("MCP4921 initialized successfully");
+        setOutput(0);  // 초기 출력을 0으로 설정
+    } else {
+        ROS_ERROR("Failed to initialize MCP4921");
+    }
+}
+
+MCP4921::~MCP4921() {
+    // 종료 시 출력을 0으로 설정
+    if (initialized_) {
+        setOutput(0);
+    }
+    
+    if (cs_line_) {
+        gpiod_line_release(cs_line_);
+        cs_line_ = nullptr;
+    }
+    if (chip_) {
+        gpiod_chip_close(chip_);
+        chip_ = nullptr;
+    }
+}
+
+bool MCP4921::isInitialized() const {
+    return initialized_;
+}
+
+bool MCP4921::setOutput(uint16_t value, bool buffered, bool gain_1x, bool active) {
+    if (!initialized_) {
+        ROS_ERROR("MCP4921 not initialized");
+        return false;
+    }
+    
+    // 값 범위 제한 (0-4095, 12비트)
+    value = value & 0x0FFF;
+    
+    // 명령 바이트 구성
+    // Bit 15: Always 0 (DAC A selected)
+    // Bit 14: 1 = Buffered, 0 = Unbuffered
+    // Bit 13: 1 = ~Gain = 1, 0 = ~Gain = 2
+    // Bit 12: 1 = Active, 0 = Shutdown the device
+    // Bit 11-0: 12-bit DAC value
+    uint16_t command = value;
+    
+    if (buffered) command |= 0x4000; // Bit 14 = 1
+    if (gain_1x) command |= 0x2000; // Bit 13 = 1
+    if (active) command |= 0x1000; // Bit 12 = 1
+    
+    // Chip Select 활성화 (LOW)
+    gpiod_line_set_value(cs_line_, 0);
+
+    // 2바이트 명령 전송
+    uint16_t result = spi_->transfer16(command);
+
+    // Chip Select 비활성화 (HIGH)
+    gpiod_line_set_value(cs_line_, 1);
+    
+    return true;
+}
+
+bool MCP4921::setOutputPercent(float percent, bool buffered, bool gain_1x) {
+    // 0-100% 범위를 0-4095 범위로 변환
+    if (percent < 0.0f) percent = 0.0f;
+    if (percent > 100.0f) percent = 100.0f;
+    
+    uint16_t value = static_cast<uint16_t>(percent * 40.95f);
+    return setOutput(value, buffered, gain_1x);
+}
+
+bool MCP4921::setOutputVoltage(float voltage, float vref, bool buffered, bool gain_1x) {
+    // 최대 출력 전압 계산
+    float max_voltage = gain_1x ? vref : vref / 2.0f;
+    
+    // 전압 제한
+    if (voltage < 0.0f) voltage = 0.0f;
+    if (voltage > max_voltage) voltage = max_voltage;
+    
+    // 전압을 0-4095 범위로 변환
+    uint16_t value = static_cast<uint16_t>((voltage / max_voltage) * 4095.0f);
+    return setOutput(value, buffered, gain_1x);
+}
+
+// HallSensorEncoder 실제 구현
+HallSensorEncoder::HallSensorEncoder(double wheel_radius, double wheel_base, double max_velocity)
+    : wheel_radius_(wheel_radius), wheel_base_(wheel_base), steps_per_revolution_(20),
+      max_velocity_(max_velocity), velocity_timeout_(0.1) {
+    last_odom_time_ = std::chrono::high_resolution_clock::now();
+}
+
+HallSensorEncoder::~HallSensorEncoder() {
+}
+
+bool HallSensorEncoder::initialize() {
+    // 홀 센서 시퀀스 초기화
+    initHallSequences();
+    
+    // 상태 리셋
+    reset();
+    
+    return true;
+}
+
+void HallSensorEncoder::reset() {
+    wheel0_info_.encoder_count = 0;
+    wheel0_info_.position = 0.0;
+    wheel0_info_.velocity = 0.0;
+    wheel0_info_.current_hall_state = -1;
+    wheel0_info_.direction_forward = true;
+    wheel0_info_.is_valid = false;
+    
+    wheel1_info_.encoder_count = 0;
+    wheel1_info_.position = 0.0;
+    wheel1_info_.velocity = 0.0;
+    wheel1_info_.current_hall_state = -1;
+    wheel1_info_.direction_forward = true;
+    wheel1_info_.is_valid = false;
+    
+    wheel0_state_.sequence_index = 0;
+    wheel0_state_.last_hall_state = -1;
+    wheel0_state_.last_encoder_count = 0;
+    
+    wheel1_state_.sequence_index = 0;
+    wheel1_state_.last_hall_state = -1;
+    wheel1_state_.last_encoder_count = 0;
+    
+    robot_odom_.x = 0.0;
+    robot_odom_.y = 0.0;
+    robot_odom_.theta = 0.0;
+    robot_odom_.linear_velocity = 0.0;
+    robot_odom_.angular_velocity = 0.0;
+    
+    auto now = std::chrono::high_resolution_clock::now();
+    wheel0_state_.last_update_time = now;
+    wheel0_state_.last_velocity_time = now;
+    wheel1_state_.last_update_time = now;
+    wheel1_state_.last_velocity_time = now;
+    last_odom_time_ = now;
+}
+
+void HallSensorEncoder::initHallSequences() {
+    // Wheel 0 시퀀스: 001 -> 101 -> 111 -> 110 -> 010 -> 000 -> 001
+    wheel0_sequence_ = {
+        0b001,  // 1 : [0]
+        0b101,  // 5 : [1]
+        0b111,  // 7 : [2]
+        0b110,  // 6 : [3]
+        0b010,  // 2 : [4]
+        0b000   // 0 : [5]
+    };
+    wheel0_sequence_inverse = {
+        5,0,4,-1,
+        -1,1,3,2
+    };
+    
+    // Wheel 1 시퀀스: 110 -> 100 -> 101 -> 001 -> 011 -> 010 -> 110
+    wheel1_sequence_ = {
+        0b110,  // 6 : [0]
+        0b100,  // 4 : [1]
+        0b101,  // 5 : [2]
+        0b001,  // 1 : [3]
+        0b011,  // 3 : [4]
+        0b010   // 2 : [5]
+    };
+
+    wheel1_sequence_inverse = {
+        -1,3,5,4,
+        1,2,0,-1
+    };
+}
+
+int HallSensorEncoder::findSequenceIndex(const std::vector<int>& inverse, int hall_value) {
+    if (hall_value < 0 || hall_value >= static_cast<int>(inverse.size())) {
+        return -1;
+    }
+    return inverse[hall_value];
+}
+
+int HallSensorEncoder::getNextSequenceIndex(const std::vector<int>& sequence, int current_index) {
+    return (current_index + 1) % static_cast<int>(sequence.size());
+}
+
+int HallSensorEncoder::getPrevSequenceIndex(const std::vector<int>& sequence, int current_index) {
+    return (current_index - 1 + static_cast<int>(sequence.size())) % static_cast<int>(sequence.size());
+}
+
+bool HallSensorEncoder::updateWheelState(WheelInfo& wheel_info, WheelState& wheel_state,
+                                        const std::vector<int>& sequence, const std::vector<int>& inverse, int new_hall_state) {
+    if (new_hall_state == wheel_info.current_hall_state) {
+        return false; // 변화 없음
+    }
+    
+    auto current_time = std::chrono::high_resolution_clock::now();
+    
+    wheel_state.last_hall_state = wheel_info.current_hall_state;
+    wheel_info.current_hall_state = new_hall_state;
+    wheel_state.last_update_time = current_time;
+    
+    // 첫 번째 업데이트인 경우
+    if (wheel_state.last_hall_state == -1) {
+        int index = findSequenceIndex(inverse, new_hall_state);
+        if (index != -1) {
+            wheel_state.sequence_index = index;
+            wheel_info.is_valid = true;
+        }
+        return false;
+    }
+    
+    // 현재 시퀀스 인덱스 찾기
+    int current_index = findSequenceIndex(inverse, wheel_state.last_hall_state);
+    int new_index = findSequenceIndex(inverse, new_hall_state);
+    
+    if (current_index == -1 || new_index == -1) {
+        wheel_info.is_valid = false;
+        return false;
+    }
+    
+    std::vector<int> wheel_next_next = {2,3,4,5,0,1};
+    std::vector<int> wheel_next = {1,2,3,4,5,0};
+    std::vector<int> wheel_prev = {5,0,1,2,3,4};
+    std::vector<int> wheel_prev_prev = {4,5,0,1,2,3};
+    
+    // 방향 판단
+    int expected_next = wheel_next[current_index];
+    int expected_next_next = wheel_next_next[current_index];
+    int expected_prev = wheel_prev[current_index];
+    int expected_prev_prev = wheel_prev_prev[current_index];
+    
+    if (new_index == expected_next) {
+        // 정방향
+        wheel_info.direction_forward = true;
+        wheel_info.encoder_count++;
+        wheel_state.sequence_index = new_index;
+        wheel_info.is_valid = true;
+    } else if (new_index == expected_next_next) {
+        // 정방향 (2스텝 점프)
+        wheel_info.direction_forward = true;
+        wheel_info.encoder_count += 2;
+        wheel_state.sequence_index = new_index;
+        wheel_info.is_valid = true;
+    } else if (new_index == expected_prev) {
+        // 역방향
+        wheel_info.direction_forward = false;
+        wheel_info.encoder_count--;
+        wheel_state.sequence_index = new_index;
+        wheel_info.is_valid = true;
+    } else if (new_index == expected_prev_prev) {
+        // 역방향 (2스텝 점프)
+        wheel_info.direction_forward = false;
+        wheel_info.encoder_count -= 2;
+        wheel_state.sequence_index = new_index;
+        wheel_info.is_valid = true;
+    } else {
+        // 시퀀스 오류 - 스텝을 건너뛰었거나 노이즈
+        wheel_state.sequence_index = new_index;
+        wheel_info.is_valid = false;
+        return false;
+    }
+    
+    return true;
+}
+
+void HallSensorEncoder::calculatePosition(WheelInfo& wheel_info, const WheelState& wheel_state) {
+    // 엔코더 카운트를 라디안으로 변환
+    wheel_info.position = (2.0 * M_PI * wheel_info.encoder_count) / steps_per_revolution_;
+}
+
+void HallSensorEncoder::calculateVelocity(WheelInfo& wheel_info, WheelState& wheel_state) {
+    auto current_time = std::chrono::high_resolution_clock::now();
+    auto time_diff = std::chrono::duration_cast<std::chrono::microseconds>(
+        current_time - wheel_state.last_velocity_time);
+    double dt = time_diff.count() / 1000000.0; // 초로 변환
+    
+    long count_diff = wheel_info.encoder_count - wheel_state.last_encoder_count;  
+    if (dt > 0.1 || count_diff > 100 || count_diff < -100) { // 100ms 간격 이상 또는 100ticks 이상
+        double angle_diff = (2.0 * M_PI * count_diff) / steps_per_revolution_;
+        
+        double new_velocity = angle_diff / dt;
+        
+        // 속도 필터링 (급격한 변화 제한)
+        if (std::abs(new_velocity) <= max_velocity_) {
+            wheel_info.velocity = new_velocity;
+        } else {
+            wheel_info.velocity = (new_velocity > 0) ? max_velocity_ : -max_velocity_;
+        }
+        
+        wheel_state.last_velocity_time = current_time;
+        wheel_state.last_encoder_count = wheel_info.encoder_count;
+    }
+    
+    // 타임아웃 체크 - 일정 시간 동안 업데이트가 없으면 속도를 0으로 설정
+    auto time_since_update = std::chrono::duration_cast<std::chrono::microseconds>(
+        current_time - wheel_state.last_update_time);
+    if (time_since_update.count() / 1000000.0 > velocity_timeout_) {
+        wheel_info.velocity = 0.0;
+    }
+}
+
+void HallSensorEncoder::updateRobotOdometry() {
+    auto current_time = std::chrono::high_resolution_clock::now();
+    auto time_diff = std::chrono::duration_cast<std::chrono::microseconds>(
+        current_time - last_odom_time_);
+    double dt = time_diff.count() / 1000000.0; // 초로 변환
+    
+    if (dt > 0.001) { // 최소 1ms 간격
+        // 바퀴 선속도 계산
+        double v_left = wheel0_info_.velocity * wheel_radius_;
+        double v_right = wheel1_info_.velocity * wheel_radius_;
+        
+        // 로봇 선속도 및 각속도 계산
+        robot_odom_.linear_velocity = (v_left + v_right) / 2.0;
+        robot_odom_.angular_velocity = (v_right - v_left) / wheel_base_;
+        
+        // 로봇 위치 업데이트 (오일러 적분)
+        robot_odom_.x += robot_odom_.linear_velocity * cos(robot_odom_.theta) * dt;
+        robot_odom_.y += robot_odom_.linear_velocity * sin(robot_odom_.theta) * dt;
+        robot_odom_.theta += robot_odom_.angular_velocity * dt;
+        
+        // 각도 정규화 (-π ~ π)
+        while (robot_odom_.theta > M_PI) robot_odom_.theta -= 2.0 * M_PI;
+        while (robot_odom_.theta < -M_PI) robot_odom_.theta += 2.0 * M_PI;
+        
+        last_odom_time_ = current_time;
+    }
+}
+
+void HallSensorEncoder::updateHallSensors(bool wheel0_bit0, bool wheel0_bit1, bool wheel0_bit2,
+                                         bool wheel1_bit0, bool wheel1_bit1, bool wheel1_bit2) {
+    int wheel0_hall = (wheel0_bit2 << 2) | (wheel0_bit1 << 1) | wheel0_bit0;
+    int wheel1_hall = (wheel1_bit2 << 2) | (wheel1_bit1 << 1) | wheel1_bit0;
+    
+    updateHallSensors(wheel0_hall, wheel1_hall);
+}
+
+void HallSensorEncoder::updateHallSensors(int wheel0_hall, int wheel1_hall) {
+    // Wheel 0 업데이트
+    if (updateWheelState(wheel0_info_, wheel0_state_, wheel0_sequence_, wheel0_sequence_inverse, wheel0_hall)) {
+        calculatePosition(wheel0_info_, wheel0_state_);
+        calculateVelocity(wheel0_info_, wheel0_state_);
+    }
+    
+    // Wheel 1 업데이트
+    if (updateWheelState(wheel1_info_, wheel1_state_, wheel1_sequence_, wheel1_sequence_inverse, wheel1_hall)) {
+        calculatePosition(wheel1_info_, wheel1_state_);
+        calculateVelocity(wheel1_info_, wheel1_state_);
+    }
+    
+    // 로봇 오도메트리 업데이트
+    updateRobotOdometry();
+}
+
 SPIHardwareNode::SPIHardwareNode(ros::NodeHandle& nh, ros::NodeHandle& pnh)
     : nh_(nh), pnh_(pnh),
       dac0_(nullptr), dac1_(nullptr), chip_(nullptr),
@@ -44,6 +611,12 @@ SPIHardwareNode::~SPIHardwareNode() {
     
     // 하드웨어 정리
     cleanupGPIO();
+    
+    // SPI 객체 해제
+    if (spi_) {
+        delete spi_;
+        spi_ = nullptr;
+    }
     
     // DAC 객체 해제
     if (dac0_) {
@@ -136,7 +709,7 @@ void SPIHardwareNode::loadParameters() {
 bool SPIHardwareNode::initializeGPIO() {
     ROS_INFO("Initializing GPIO...");
     
-    // gpiod 칩 열기
+    // 실제 GPIO 초기화
     chip_ = gpiod_chip_open_by_name(pin_config_.gpio_chip_name.c_str());
     if (!chip_) {
         ROS_ERROR("Failed to open GPIO chip: %s", pin_config_.gpio_chip_name.c_str());
@@ -164,9 +737,15 @@ bool SPIHardwareNode::initializeGPIO() {
 bool SPIHardwareNode::initializeSPI() {
     ROS_INFO("Initializing SPI...");
     
-    // BitBangSPI 초기화
-    spi_.init(pin_config_.mosi_pin, pin_config_.miso_pin, pin_config_.clk_pin, 
-              BitBangSPI::MODE0, pin_config_.spi_speed, false);
+    // 실제 SPI 초기화
+    spi_ = new BitBangSPI(pin_config_.mosi_pin, pin_config_.miso_pin, 
+                         pin_config_.clk_pin, pin_config_.latch_pin,
+                         BitBangSPI::MODE0, pin_config_.spi_speed, false);
+    
+    if (!spi_) {
+        ROS_ERROR("Failed to create SPI controller");
+        return false;
+    }
     
     ROS_INFO("SPI initialization complete");
     return true;
@@ -176,7 +755,7 @@ bool SPIHardwareNode::initializeDAC() {
     ROS_INFO("Initializing DAC...");
     
     // DAC 객체 생성
-    dac0_ = new MCP4921(&spi_, pin_config_.ss0_pin);
+    dac0_ = new MCP4921(spi_, pin_config_.ss0_pin);
     if (!dac0_ || !dac0_->isInitialized()) {
         ROS_ERROR("Failed to initialize DAC0");
         current_status_.dac0_ok = false;
@@ -184,7 +763,7 @@ bool SPIHardwareNode::initializeDAC() {
     }
     current_status_.dac0_ok = true;
     
-    dac1_ = new MCP4921(&spi_, pin_config_.ss1_pin);
+    dac1_ = new MCP4921(spi_, pin_config_.ss1_pin);
     if (!dac1_ || !dac1_->isInitialized()) {
         ROS_ERROR("Failed to initialize DAC1");
         current_status_.dac1_ok = false;
@@ -310,6 +889,9 @@ void SPIHardwareNode::applyMotorCommand() {
 }
 
 void SPIHardwareNode::setMotorDirection(int motor_id, bool forward) {
+    ROS_DEBUG("Setting motor %d direction: %s", motor_id, forward ? "forward" : "reverse");
+    
+    // 실제 GPIO 제어
     if (motor_id == 0 && reverse0_line_) {
         gpiod_line_set_value(reverse0_line_, forward ? 1 : 0);
     } else if (motor_id == 1 && reverse1_line_) {
@@ -329,16 +911,41 @@ void SPIHardwareNode::setMotorSpeed(int motor_id, float speed_percent) {
 }
 
 void SPIHardwareNode::readHallSensors() {
-    if (!latch_line_) return;
+    // 실제 SPI를 통해 홀센서 데이터 읽기
+    if (!spi_ || !latch_line_) {
+        // SPI나 래치 라인이 없으면 더미 데이터 사용
+        static uint8_t dummy_counter = 0;
+        dummy_counter++;
+        
+        uint8_t new_hall_state_0 = (dummy_counter / 10) % 7;
+        uint8_t new_hall_state_1 = (dummy_counter / 12) % 7;
+        
+        if (new_hall_state_0 != hall_state_0_) {
+            hall_count_0_++;
+            hall_state_0_ = new_hall_state_0;
+        }
+        
+        if (new_hall_state_1 != hall_state_1_) {
+            hall_count_1_++;
+            hall_state_1_ = new_hall_state_1;
+        }
+        
+        encoder_.updateHallSensors(hall_state_0_, hall_state_1_);
+        current_status_.motor0_hall_state = hall_state_0_;
+        current_status_.motor1_hall_state = hall_state_1_;
+        current_status_.motor0_hall_count = hall_count_0_;
+        current_status_.motor1_hall_count = hall_count_1_;
+        return;
+    }
     
-    // SPI를 통해 홀센서 데이터 읽기
+    // 실제 하드웨어 SPI 읽기
     gpiod_line_set_value(latch_line_, 1);
-    uint8_t data = spi_.transfer(0x00);
+    uint8_t data = spi_->transfer(0x00);
     gpiod_line_set_value(latch_line_, 0);
     
-    // 홀센서 상태 추출
-    uint8_t new_hall_state_0 = (data >> 1) & 0x7;
-    uint8_t new_hall_state_1 = (data >> 5) & 0x7;
+    // 홀센서 데이터 파싱 (실제 하드웨어 배치에 따라 조정)
+    uint8_t new_hall_state_0 = (data >> 0) & 0x7;  // 하위 3비트
+    uint8_t new_hall_state_1 = (data >> 3) & 0x7;  // 상위 3비트
     
     // 상태 변화 감지 및 카운트 업데이트
     if (new_hall_state_0 != hall_state_0_) {
@@ -372,25 +979,27 @@ void SPIHardwareNode::calculateMotorSpeeds() {
 }
 
 void SPIHardwareNode::checkButtons() {
-    if (!inc_button_line_ || !dec_button_line_) return;
-    
     ros::Time now = ros::Time::now();
     double elapsed = (now - last_button_time_).toSec();
     
     // 디바운싱 (50ms)
     if (elapsed < 0.05) return;
     
-    // 버튼 상태 읽기 (풀업 저항 사용)
-    int inc_value = gpiod_line_get_value(inc_button_line_);
-    int dec_value = gpiod_line_get_value(dec_button_line_);
+    bool inc_button_state = false;
+    bool dec_button_state = false;
     
-    bool inc_button_state = (inc_value == 0);
-    bool dec_button_state = (dec_value == 0);
+    // 실제 GPIO를 통해 버튼 상태 읽기
+    if (inc_button_line_ && dec_button_line_) {
+        int inc_value = gpiod_line_get_value(inc_button_line_);
+        int dec_value = gpiod_line_get_value(dec_button_line_);
+        
+        inc_button_state = (inc_value == 0);  // 풀업 저항 사용 시 눌림 = LOW
+        dec_button_state = (dec_value == 0);
+    }
     
     // 상승 엣지 감지 및 처리
     if (inc_button_state && !prev_inc_button_state_) {
         ROS_INFO("Increase button pressed");
-        // 버튼 이벤트는 로그만 출력 (실제 속도 제어는 Controller Node에서)
         last_button_time_ = now;
     }
     

@@ -1,23 +1,31 @@
 <?xml version="1.0"?>
-<!-- 하드웨어 테스트 전용 런치 파일 -->
+<!-- 하드웨어 노드만 테스트하는 런치 파일 -->
 <launch>
-  <!-- 매개변수 로드 -->
-  <rosparam file="$(find balance_robot_nodes)/config/balance_robot_params.yaml" command="load" />
+  <!-- 인수 정의 -->
+  <arg name="config_file" default="$(find balance_robot_nodes)/config/balance_robot_params.yaml" />
+  <arg name="log_level" default="INFO" />
   
-  <!-- SPI Hardware Node만 실행 -->
+  <!-- 매개변수 로드 -->
+  <rosparam file="$(arg config_file)" command="load" />
+  
+  <!-- SPI Hardware Node -->
   <node name="spi_hardware_node" pkg="balance_robot_nodes" type="spi_hardware_node" output="screen">
-    <param name="log_level" value="DEBUG" />
+    <param name="log_level" value="$(arg log_level)" />
+    <remap from="motor_command" to="/balance_robot/motor_command" />
+    <remap from="motor_status" to="/balance_robot/motor_status" />
+    <remap from="motor0_speed" to="/balance_robot/motor0_speed" />
+    <remap from="motor1_speed" to="/balance_robot/motor1_speed" />
   </node>
   
-  <!-- 수동 모터 제어를 위한 테스트 퍼블리셔 -->
-  <node name="test_motor_publisher" pkg="rostopic" type="rostopic" 
-        args="pub -r 10 /motor_command balance_robot_nodes/MotorCommand 
-        '{header: {stamp: now, frame_id: base_link}, 
-         motor0_output: 0.0, motor1_output: 0.0, 
-         motor0_direction: true, motor1_direction: true, 
-         control_mode: 0, emergency_stop: false}'" />
-  
-  <!-- 모터 상태 모니터링 -->
-  <node name="motor_status_echo" pkg="rostopic" type="rostopic" args="echo /motor_status" />
+  <!-- I2C Sensor Node -->
+  <node name="i2c_sensor_node" pkg="balance_robot_nodes" type="i2c_sensor_node" output="screen">
+    <param name="log_level" value="$(arg log_level)" />
+    <remap from="sensor_data" to="/balance_robot/sensor_data" />
+    <remap from="imu/data" to="/balance_robot/imu/data" />
+    <remap from="imu/temperature" to="/balance_robot/imu/temperature" />
+    <remap from="sensor_roll" to="/balance_robot/sensor_roll" />
+    <remap from="sensor_pitch" to="/balance_robot/sensor_pitch" />
+    <remap from="sensor_confidence" to="/balance_robot/sensor_confidence" />
+  </node>
   
 </launch> 

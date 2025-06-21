@@ -7,48 +7,139 @@
 #include "balance_robot_nodes/MotorStatus.h"
 #include "balance_robot_nodes/hardware_interface.h"
 
-// 임시 클래스 선언 (실제 하드웨어에서는 기존 motor_controller 파일 사용)
+// 실제 BitBangSPI 구현 (motor_controller에서 가져옴)
+#include <gpiod.h>
+#include <chrono>
+#include <thread>
+
 class BitBangSPI {
 public:
-    enum Mode { MODE0 = 0 };
-    BitBangSPI() {}
-    BitBangSPI(int clk_pin, int mosi_pin, int miso_pin, Mode mode, int speed, bool lsb_first) 
-        : clk_pin_(clk_pin), mosi_pin_(mosi_pin), miso_pin_(miso_pin), 
-          mode_(mode), speed_(speed), lsb_first_(lsb_first) {}
-    void init() { /* 실제 구현에서는 기존 코드 사용 */ }
-    void init(int mosi, int miso, int clk, Mode mode, int speed, bool lsb_first) { /* 실제 구현 */ }
-    uint8_t transfer(uint8_t data) { return 0; /* 실제 구현에서는 기존 코드 사용 */ }
+    enum SPIMode { MODE0 = 0, MODE1 = 1, MODE2 = 2, MODE3 = 3 };
+    
+    BitBangSPI(int mosi_pin, int miso_pin, int sclk_pin, int cs_pin,
+               SPIMode mode, uint32_t max_speed_hz, bool bit_order_lsb);
+    ~BitBangSPI();
+    
+    void initGPIO();
+    void cleanupGPIO();
+    void delayMicroseconds(unsigned int usec);
+    uint8_t transfer(uint8_t data_out);
+    uint16_t transfer16(uint16_t data_out);
+    void setMode(SPIMode mode);
+    void setMaxSpeed(uint32_t speed_hz);
+    void setCS(bool level);
+
 private:
-    int clk_pin_, mosi_pin_, miso_pin_;
-    Mode mode_;
-    int speed_;
-    bool lsb_first_;
+    int mosi_pin_, miso_pin_, sclk_pin_, cs_pin_;
+    SPIMode mode_;
+    uint32_t max_speed_hz_;
+    bool bit_order_lsb_;
+    bool cpol_, cpha_;
+    bool gpio_initialized_;
+    
+    struct gpiod_chip* chip_;
+    struct gpiod_line* mosi_line_;
+    struct gpiod_line* miso_line_;
+    struct gpiod_line* sclk_line_;
+    struct gpiod_line* cs_line_;
 };
 
 class MCP4921 {
 public:
-    MCP4921(int channel) : channel_(channel) {}
-    MCP4921(BitBangSPI* spi, int cs_pin) : channel_(cs_pin), spi_(spi) {}
-    void setOutputPercent(float percent) { /* 실제 구현에서는 기존 코드 사용 */ }
-    bool isInitialized() { return true; /* 임시로 항상 true */ }
+    MCP4921(BitBangSPI* spi, int cs_pin);
+    ~MCP4921();
+    
+    bool isInitialized() const;
+    bool setOutput(uint16_t value, bool buffered = true, bool gain_1x = true, bool active = true);
+    bool setOutputPercent(float percent, bool buffered = true, bool gain_1x = true);
+    bool setOutputVoltage(float voltage, float vref = 3.3f, bool buffered = true, bool gain_1x = true);
+
 private:
-    int channel_;
     BitBangSPI* spi_;
+    int cs_pin_;
+    bool initialized_;
+    
+    struct gpiod_chip* chip_;
+    struct gpiod_line* cs_line_;
 };
 
 class HallSensorEncoder {
 public:
-    HallSensorEncoder() {}
-    HallSensorEncoder(double wheel_radius, double wheel_distance, int hall_states) 
-        : wheel_radius_(wheel_radius), wheel_distance_(wheel_distance), hall_states_(hall_states) {}
-    void initialize() { /* 실제 구현에서는 기존 코드 사용 */ }
-    void updateHallSensors(uint8_t state0, uint8_t state1) { /* 실제 구현에서는 기존 코드 사용 */ }
-    double getWheel0Velocity() { return 0.0; /* 실제 구현에서는 기존 코드 사용 */ }
-    double getWheel1Velocity() { return 0.0; /* 실제 구현에서는 기존 코드 사용 */ }
+    struct WheelInfo {
+        long encoder_count = 0;
+        double position = 0.0;
+        double velocity = 0.0;
+        int current_hall_state = -1;
+        bool direction_forward = true;
+        bool is_valid = false;
+    };
+    
+    struct RobotOdometry {
+        double x = 0.0;
+        double y = 0.0;
+        double theta = 0.0;
+        double linear_velocity = 0.0;
+        double angular_velocity = 0.0;
+    };
+    
+    HallSensorEncoder(double wheel_radius, double wheel_base, double max_velocity = 10.0);
+    ~HallSensorEncoder();
+    
+    bool initialize();
+    void reset();
+    void updateHallSensors(int wheel0_hall, int wheel1_hall);
+    void updateHallSensors(bool wheel0_bit0, bool wheel0_bit1, bool wheel0_bit2,
+                          bool wheel1_bit0, bool wheel1_bit1, bool wheel1_bit2);
+    
+    // 접근자
+    const WheelInfo& getWheel0Info() const { return wheel0_info_; }
+    const WheelInfo& getWheel1Info() const { return wheel1_info_; }
+    const RobotOdometry& getRobotOdometry() const { return robot_odom_; }
+    
+    double getWheel0Velocity() const { return wheel0_info_.velocity; }
+    double getWheel1Velocity() const { return wheel1_info_.velocity; }
+    double getWheel0Position() const { return wheel0_info_.position; }
+    double getWheel1Position() const { return wheel1_info_.position; }
+
 private:
+    struct WheelState {
+        int sequence_index = 0;
+        int last_hall_state = -1;
+        std::chrono::high_resolution_clock::time_point last_update_time;
+        std::chrono::high_resolution_clock::time_point last_velocity_time;
+        long last_encoder_count = 0;
+    };
+    
+    // 하드웨어 파라미터
     double wheel_radius_;
-    double wheel_distance_;
-    int hall_states_;
+    double wheel_base_;
+    int steps_per_revolution_;
+    double max_velocity_;
+    double velocity_timeout_;
+    
+    // 상태
+    WheelInfo wheel0_info_;
+    WheelInfo wheel1_info_;
+    WheelState wheel0_state_;
+    WheelState wheel1_state_;
+    RobotOdometry robot_odom_;
+    std::chrono::high_resolution_clock::time_point last_odom_time_;
+    
+    // 홀센서 시퀀스
+    std::vector<int> wheel0_sequence_;
+    std::vector<int> wheel1_sequence_;
+    std::vector<int> wheel0_sequence_inverse;
+    std::vector<int> wheel1_sequence_inverse;
+    
+    void initHallSequences();
+    int findSequenceIndex(const std::vector<int>& inverse, int hall_value);
+    int getNextSequenceIndex(const std::vector<int>& sequence, int current_index);
+    int getPrevSequenceIndex(const std::vector<int>& sequence, int current_index);
+    bool updateWheelState(WheelInfo& wheel_info, WheelState& wheel_state,
+                         const std::vector<int>& sequence, const std::vector<int>& inverse, int new_hall_state);
+    void calculatePosition(WheelInfo& wheel_info, const WheelState& wheel_state);
+    void calculateVelocity(WheelInfo& wheel_info, WheelState& wheel_state);
+    void updateRobotOdometry();
 };
 
 #include <gpiod.h>

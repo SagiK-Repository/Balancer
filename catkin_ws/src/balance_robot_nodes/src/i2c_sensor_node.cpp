@@ -3,6 +3,203 @@
 #include <std_msgs/Float32.h>
 #include <cmath>
 
+// I2CController 실제 구현
+I2CController::I2CController() : 
+    i2c_file(-1),
+    i2c_device("/dev/i2c-1"),  // Jetson Nano의 기본 I2C 버스
+    accel_offset_x(0), accel_offset_y(0), accel_offset_z(0),
+    gyro_offset_x(0), gyro_offset_y(0), gyro_offset_z(0),
+    accel_scale(8192.0),   // ±4g 설정 시 (16384/2)
+    gyro_scale(65.5)       // ±500°/s 설정 시 (131/2)
+{
+    ROS_INFO("I2C Controller initialized");
+}
+
+I2CController::~I2CController() {
+    closeI2C();
+}
+
+bool I2CController::initI2C() {
+    // I2C 디바이스 파일 열기
+    i2c_file = open(i2c_device.c_str(), O_RDWR);
+    if (i2c_file < 0) {
+        ROS_ERROR("Failed to open I2C device: %s", i2c_device.c_str());
+        return false;
+    }
+    
+    // I2C 슬레이브 주소 설정
+    if (ioctl(i2c_file, I2C_SLAVE, MPU6050_ADDR) < 0) {
+        ROS_ERROR("Failed to set I2C slave address");
+        close(i2c_file);
+        i2c_file = -1;
+        return false;
+    }
+    
+    ROS_INFO("I2C initialized successfully on %s", i2c_device.c_str());
+    return true;
+}
+
+void I2CController::closeI2C() {
+    if (i2c_file >= 0) {
+        close(i2c_file);
+        i2c_file = -1;
+        ROS_INFO("I2C connection closed");
+    }
+}
+
+bool I2CController::initMPU6050() {
+    ROS_INFO("Initializing GY-521 (MPU6050) module...");
+    
+    // 1. MPU6050 리셋 및 깨우기
+    if (!writeRegister(PWR_MGMT_1, 0x80)) {  // 디바이스 리셋
+        ROS_ERROR("Failed to reset MPU6050");
+        return false;
+    }
+    usleep(100000); // 100ms 대기 (리셋 완료)
+    
+    if (!writeRegister(PWR_MGMT_1, 0x01)) {  // X 자이로 클럭 사용, 슬립 해제
+        ROS_ERROR("Failed to wake up MPU6050");
+        return false;
+    }
+    usleep(50000); // 50ms 대기
+    
+    // 2. 샘플레이트 설정 (1kHz / (1 + SMPLRT_DIV))
+    if (!writeRegister(SMPLRT_DIV, 0x09)) { // 100Hz (밸런싱에 최적)
+        ROS_ERROR("Failed to set sample rate");
+        return false;
+    }
+    
+    // 3. 디지털 로우패스 필터 설정 (GY-521 최적화)
+    if (!writeRegister(CONFIG, 0x03)) {  // 44Hz LPF (노이즈 감소)
+        ROS_ERROR("Failed to set DLPF config");
+        return false;
+    }
+    
+    // 4. 자이로스코프 설정 (±500°/s - 밸런싱에 적합)
+    if (!writeRegister(GYRO_CONFIG, 0x08)) {  // ±500°/s
+        ROS_ERROR("Failed to set gyro config");
+        return false;
+    }
+    
+    // 5. 가속도계 설정 (±4g - 더 넓은 범위)
+    if (!writeRegister(ACCEL_CONFIG, 0x08)) {  // ±4g
+        ROS_ERROR("Failed to set accel config");
+        return false;
+    }
+    
+    usleep(100000); // 100ms 대기 (설정 안정화)
+    
+    ROS_INFO("GY-521 (MPU6050) initialized successfully");
+    ROS_INFO("Configuration: 100Hz, ±4g accel, ±500°/s gyro, 44Hz LPF");
+    return true;
+}
+
+bool I2CController::writeRegister(uint8_t reg, uint8_t value) {
+    uint8_t buffer[2] = {reg, value};
+    
+    if (write(i2c_file, buffer, 2) != 2) {
+        ROS_ERROR("Failed to write to register 0x%02X", reg);
+        return false;
+    }
+    
+    return true;
+}
+
+bool I2CController::readRegister(uint8_t reg, uint8_t* data, int length) {
+    // 레지스터 주소 쓰기
+    if (write(i2c_file, &reg, 1) != 1) {
+        ROS_ERROR("Failed to write register address 0x%02X", reg);
+        return false;
+    }
+    
+    // 데이터 읽기
+    if (read(i2c_file, data, length) != length) {
+        ROS_ERROR("Failed to read from register 0x%02X", reg);
+        return false;
+    }
+    
+    return true;
+}
+
+bool I2CController::readSensorData(SensorData& data) {
+    uint8_t buffer[14];
+    
+    // 가속도, 온도, 자이로 데이터를 한 번에 읽기
+    if (!readRegister(ACCEL_XOUT_H, buffer, 14)) {
+        return false;
+    }
+    
+    // 16비트 데이터 조합
+    data.accel_x = (buffer[0] << 8) | buffer[1];
+    data.accel_y = (buffer[2] << 8) | buffer[3];
+    data.accel_z = (buffer[4] << 8) | buffer[5];
+    data.temp = (buffer[6] << 8) | buffer[7];
+    data.gyro_x = (buffer[8] << 8) | buffer[9];
+    data.gyro_y = (buffer[10] << 8) | buffer[11];
+    data.gyro_z = (buffer[12] << 8) | buffer[13];
+    
+    return true;
+}
+
+void I2CController::calibrateSensor() {
+    ROS_INFO("Calibrating GY-521 sensor... Keep the sensor still for 3 seconds!");
+    
+    const int samples = 100;  // 더 많은 샘플로 정확도 향상
+    double accel_x_sum = 0, accel_y_sum = 0, accel_z_sum = 0;
+    double gyro_x_sum = 0, gyro_y_sum = 0, gyro_z_sum = 0;
+    
+    SensorData data;
+    int valid_samples = 0;
+    
+    for (int i = 0; i < samples; i++) {
+        if (readSensorData(data)) {
+            accel_x_sum += data.accel_x;
+            accel_y_sum += data.accel_y;
+            accel_z_sum += data.accel_z;
+            gyro_x_sum += data.gyro_x;
+            gyro_y_sum += data.gyro_y;
+            gyro_z_sum += data.gyro_z;
+            valid_samples++;
+        }
+        
+        // 진행 상황 표시
+        if (i % 40 == 0) {
+            ROS_INFO("Calibration progress: %d%%", (i * 100) / samples);
+        }
+        
+        usleep(25000); // 25ms 대기 (100Hz에 맞춤)
+    }
+    
+    if (valid_samples < samples * 0.8) {
+        ROS_WARN("Only %d/%d samples collected during calibration", valid_samples, samples);
+    }
+    
+    // 오프셋 계산
+    accel_offset_x = accel_x_sum / valid_samples;
+    accel_offset_y = accel_y_sum / valid_samples;
+    accel_offset_z = accel_z_sum / valid_samples;
+    gyro_offset_x = gyro_x_sum / valid_samples;
+    gyro_offset_y = gyro_y_sum / valid_samples;
+    gyro_offset_z = gyro_z_sum / valid_samples;
+    
+    ROS_INFO("Sensor calibration complete:");
+    ROS_INFO("  Accel offsets: X=%.2f, Y=%.2f, Z=%.2f", accel_offset_x, accel_offset_y, accel_offset_z);
+    ROS_INFO("  Gyro offsets: X=%.2f, Y=%.2f, Z=%.2f", gyro_offset_x, gyro_offset_y, gyro_offset_z);
+}
+
+double I2CController::convertAccelData(int16_t raw_data) {
+    return (raw_data / accel_scale) * 9.81; // m/s²로 변환
+}
+
+double I2CController::convertGyroData(int16_t raw_data) {
+    return raw_data / gyro_scale; // °/s로 변환
+}
+
+double I2CController::convertTempData(int16_t raw_data) {
+    return (raw_data / 340.0) + 36.53; // °C로 변환
+}
+
+// I2CSensorNode 구현
 I2CSensorNode::I2CSensorNode(ros::NodeHandle& nh, ros::NodeHandle& pnh)
     : nh_(nh), pnh_(pnh),
       sensor_initialized_(false), sensor_calibrated_(false),
@@ -134,11 +331,13 @@ bool I2CSensorNode::initializeSensor() {
     ROS_INFO("Initializing I2C sensor...");
     
     // I2C 컨트롤러 초기화
-    i2c_controller_.init();
+    if (!i2c_controller_.initI2C()) {
+        ROS_ERROR("Failed to initialize I2C");
+        return false;
+    }
     
-    // 자가 진단 수행
-    if (!performSelfTest()) {
-        ROS_ERROR("I2C sensor self-test failed");
+    if (!i2c_controller_.initMPU6050()) {
+        ROS_ERROR("Failed to initialize MPU6050");
         return false;
     }
     
@@ -151,20 +350,12 @@ bool I2CSensorNode::initializeSensor() {
 
 bool I2CSensorNode::performSelfTest() {
     // 기본적인 통신 테스트
-    double test_data[7];
-    bool result = i2c_controller_.getData(test_data, test_data + 6);
+    SensorData test_data;
+    bool result = i2c_controller_.readSensorData(test_data);
     
     if (!result) {
         ROS_ERROR("I2C communication test failed");
         return false;
-    }
-    
-    // 데이터 유효성 검사
-    for (int i = 0; i < 6; i++) {
-        if (std::isnan(test_data[i]) || std::isinf(test_data[i])) {
-            ROS_ERROR("Invalid sensor data detected");
-            return false;
-        }
     }
     
     ROS_INFO("I2C sensor self-test passed");
@@ -174,23 +365,16 @@ bool I2CSensorNode::performSelfTest() {
 void I2CSensorNode::calibrateSensor() {
     ROS_INFO("Starting sensor calibration...");
     
-    const int calibration_samples = 100;
-    double gyro_sum[3] = {0.0, 0.0, 0.0};
+    // 실제 센서 보정 수행
+    i2c_controller_.calibrateSensor();
     
-    // 자이로스코프 오프셋 계산 (정지 상태에서)
-    for (int i = 0; i < calibration_samples; i++) {
-        double data[7];
-        if (i2c_controller_.getData(data, data + 6)) {
-            gyro_sum[0] += data[3];  // gyro_x
-            gyro_sum[1] += data[4];  // gyro_y
-            gyro_sum[2] += data[5];  // gyro_z
-        }
-        ros::Duration(0.01).sleep();  // 10ms 대기
-    }
-    
-    gyro_offset_[0] = gyro_sum[0] / calibration_samples;
-    gyro_offset_[1] = gyro_sum[1] / calibration_samples;
-    gyro_offset_[2] = gyro_sum[2] / calibration_samples;
+    // 보정값 가져오기
+    accel_offset_[0] = i2c_controller_.getAccelOffsetX();
+    accel_offset_[1] = i2c_controller_.getAccelOffsetY();
+    accel_offset_[2] = i2c_controller_.getAccelOffsetZ();
+    gyro_offset_[0] = i2c_controller_.getGyroOffsetX();
+    gyro_offset_[1] = i2c_controller_.getGyroOffsetY();
+    gyro_offset_[2] = i2c_controller_.getGyroOffsetZ();
     
     sensor_calibrated_ = true;
     
@@ -204,7 +388,7 @@ void I2CSensorNode::sensorTimerCallback(const ros::TimerEvent& event) {
     
     // 센서 데이터 읽기
     if (!readSensorData()) {
-        setError(HardwareError::SENSOR_READ_FAILED, "센서 데이터 읽기 실패");
+        setError(HardwareError::I2C_READ_FAILED, "센서 데이터 읽기 실패");
         return;
     }
     
@@ -222,7 +406,7 @@ void I2CSensorNode::sensorTimerCallback(const ros::TimerEvent& event) {
     // 신뢰도 계산
     calculateConfidence();
     
-    // 온도 보상 적용 (옵션)
+    // 온도 보상 적용
     applyTemperatureCompensation();
     
     // 데이터 발행
@@ -232,8 +416,9 @@ void I2CSensorNode::sensorTimerCallback(const ros::TimerEvent& event) {
 }
 
 bool I2CSensorNode::readSensorData() {
-    // I2C에서 센서 데이터 읽기
-    bool result = i2c_controller_.getData(sensor_data_buffer_, sensor_data_buffer_ + 6);
+    // 실제 I2C에서 센서 데이터 읽기
+    SensorData raw_data;
+    bool result = i2c_controller_.readSensorData(raw_data);
     
     if (!result) {
         current_sensor_data_.i2c_communication_ok = false;
@@ -242,14 +427,14 @@ bool I2CSensorNode::readSensorData() {
     
     current_sensor_data_.i2c_communication_ok = true;
     
-    // 원시 데이터를 메시지에 복사 (보정 적용)
-    current_sensor_data_.accel_x = sensor_data_buffer_[0] - accel_offset_[0];
-    current_sensor_data_.accel_y = sensor_data_buffer_[1] - accel_offset_[1];
-    current_sensor_data_.accel_z = sensor_data_buffer_[2] - accel_offset_[2];
-    current_sensor_data_.gyro_x = sensor_data_buffer_[3] - gyro_offset_[0];
-    current_sensor_data_.gyro_y = sensor_data_buffer_[4] - gyro_offset_[1];
-    current_sensor_data_.gyro_z = sensor_data_buffer_[5] - gyro_offset_[2];
-    current_sensor_data_.temperature = sensor_data_buffer_[6];
+    // 원시 데이터를 메시지에 복사 (변환 및 보정 적용)
+    current_sensor_data_.accel_x = i2c_controller_.convertAccelData(raw_data.accel_x - accel_offset_[0]);
+    current_sensor_data_.accel_y = i2c_controller_.convertAccelData(raw_data.accel_y - accel_offset_[1]);
+    current_sensor_data_.accel_z = i2c_controller_.convertAccelData(raw_data.accel_z - accel_offset_[2]);
+    current_sensor_data_.gyro_x = i2c_controller_.convertGyroData(raw_data.gyro_x - gyro_offset_[0]);
+    current_sensor_data_.gyro_y = i2c_controller_.convertGyroData(raw_data.gyro_y - gyro_offset_[1]);
+    current_sensor_data_.gyro_z = i2c_controller_.convertGyroData(raw_data.gyro_z - gyro_offset_[2]);
+    current_sensor_data_.temperature = i2c_controller_.convertTempData(raw_data.temp);
     
     return true;
 }
@@ -469,7 +654,7 @@ double I2CSensorNode::lowPassFilter(double input, double prev_output, double alp
 }
 
 double I2CSensorNode::vectorMagnitude(double x, double y, double z) {
-    return sqrt(x * x + y * y + z * z);
+    return sqrt(x*x + y*y + z*z);
 }
 
 // 메인 함수

@@ -7,6 +7,8 @@
   <arg name="enable_sensors" default="true" />
   <arg name="enable_controller" default="true" />
   <arg name="enable_visualization" default="false" />
+  <arg name="enable_joy" default="false" />
+  <arg name="enable_state_publisher" default="false" />
   <arg name="log_level" default="INFO" />
   
   <!-- 매개변수 로드 -->
@@ -67,14 +69,18 @@
           args="/balance_robot/sensor_roll/data /balance_robot/sensor_pitch/data" />
   </group>
   
-  <!-- 진단 노드 -->
-  <node name="robot_state_publisher" pkg="robot_state_publisher" type="robot_state_publisher" />
+  <!-- 진단 노드 (옵션) -->
+  <group if="$(arg enable_state_publisher)">
+    <node name="robot_state_publisher" pkg="robot_state_publisher" type="robot_state_publisher" />
+  </group>
   
   <!-- 원격 제어를 위한 joy 노드 (옵션) -->
-  <node name="joy_node" pkg="joy" type="joy_node" output="screen" />
-  <node name="teleop_twist_joy" pkg="teleop_twist_joy" type="teleop_node" output="screen">
-    <remap from="cmd_vel" to="/balance_robot/cmd_vel" />
-  </node>
+  <group if="$(arg enable_joy)">
+    <node name="joy_node" pkg="joy" type="joy_node" output="screen" />
+    <node name="teleop_twist_joy" pkg="teleop_twist_joy" type="teleop_node" output="screen">
+      <remap from="cmd_vel" to="/balance_robot/cmd_vel" />
+    </node>
+  </group>
   
   <!-- 로그 설정 -->
   <env name="ROSCONSOLE_CONFIG_FILE" value="$(find balance_robot_nodes)/config/custom_rosconsole.conf"/>

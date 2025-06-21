@@ -7,19 +7,65 @@
 #include "balance_robot_nodes/SensorData.h"
 #include "balance_robot_nodes/hardware_interface.h"
 
-// 임시 I2C 컨트롤러 클래스 선언 (실제 하드웨어에서는 기존 motor_controller 파일 사용)
+// 실제 I2C 컨트롤러 구현 (motor_controller에서 가져옴)
+#include <fcntl.h>
+#include <unistd.h>
+#include <sys/ioctl.h>
+#include <linux/i2c-dev.h>
+
+// MPU6050 레지스터 주소
+#define MPU6050_ADDR 0x68
+#define PWR_MGMT_1 0x6B
+#define SMPLRT_DIV 0x19
+#define CONFIG 0x1A
+#define GYRO_CONFIG 0x1B
+#define ACCEL_CONFIG 0x1C
+#define ACCEL_XOUT_H 0x3B
+
+struct SensorData {
+    int16_t accel_x, accel_y, accel_z;
+    int16_t temp;
+    int16_t gyro_x, gyro_y, gyro_z;
+};
+
 class I2CController {
 public:
-    I2CController() {}
-    void init() { /* 실제 구현에서는 기존 코드 사용 */ }
-    bool getData(double* accel_data, double* gyro_data) { 
-        // 임시 더미 데이터
-        for(int i = 0; i < 3; i++) {
-            accel_data[i] = 0.0;
-            gyro_data[i] = 0.0;
-        }
-        return true; 
-    }
+    I2CController();
+    ~I2CController();
+    
+    bool initI2C();
+    void closeI2C();
+    bool initMPU6050();
+    bool readSensorData(SensorData& data);
+    void calibrateSensor();
+    
+    // 데이터 변환 함수들
+    double convertAccelData(int16_t raw_data);
+    double convertGyroData(int16_t raw_data);
+    double convertTempData(int16_t raw_data);
+    
+    // 보정값 접근자
+    double getAccelOffsetX() const { return accel_offset_x; }
+    double getAccelOffsetY() const { return accel_offset_y; }
+    double getAccelOffsetZ() const { return accel_offset_z; }
+    double getGyroOffsetX() const { return gyro_offset_x; }
+    double getGyroOffsetY() const { return gyro_offset_y; }
+    double getGyroOffsetZ() const { return gyro_offset_z; }
+
+private:
+    bool writeRegister(uint8_t reg, uint8_t value);
+    bool readRegister(uint8_t reg, uint8_t* data, int length);
+    
+    int i2c_file;
+    std::string i2c_device;
+    
+    // 보정값
+    double accel_offset_x, accel_offset_y, accel_offset_z;
+    double gyro_offset_x, gyro_offset_y, gyro_offset_z;
+    
+    // 스케일 팩터
+    double accel_scale;  // ±4g 설정
+    double gyro_scale;   // ±500°/s 설정
 };
 
 #include <string>

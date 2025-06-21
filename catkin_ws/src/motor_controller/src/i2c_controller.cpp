@@ -165,7 +165,7 @@ bool I2CController::readSensorData(SensorData& data) {
 void I2CController::calibrateSensor() {
     ROS_INFO("Calibrating GY-521 sensor... Keep the sensor still for 5 seconds!");
     
-    const int samples = 200;  // 더 많은 샘플로 정확도 향상
+    const int samples = 100;  // 더 많은 샘플로 정확도 향상
     double accel_x_sum = 0, accel_y_sum = 0, accel_z_sum = 0;
     double gyro_x_sum = 0, gyro_y_sum = 0, gyro_z_sum = 0;
     
