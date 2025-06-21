@@ -86,8 +86,15 @@ target_link_libraries(balance_controller_node
   ${catkin_LIBRARIES}
 )
 
+# 모터 컨트롤러 브리지 노드 (기존 motor_controller 호환성)
+add_executable(motor_controller_bridge src/motor_controller_bridge.cpp)
+add_dependencies(motor_controller_bridge ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
+target_link_libraries(motor_controller_bridge
+  ${catkin_LIBRARIES}
+)
+
 ## 설치 설정
-install(TARGETS ${PROJECT_NAME} spi_hardware_node i2c_sensor_node balance_controller_node
+install(TARGETS ${PROJECT_NAME} spi_hardware_node i2c_sensor_node balance_controller_node motor_controller_bridge
   ARCHIVE DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
   LIBRARY DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
   RUNTIME DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}

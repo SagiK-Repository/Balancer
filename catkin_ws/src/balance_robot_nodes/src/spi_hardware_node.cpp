@@ -709,73 +709,130 @@ void SPIHardwareNode::loadParameters() {
 bool SPIHardwareNode::initializeGPIO() {
     ROS_INFO("Initializing GPIO...");
     
-    // 실제 GPIO 초기화
+    // 실제 GPIO 초기화 시도
     chip_ = gpiod_chip_open_by_name(pin_config_.gpio_chip_name.c_str());
     if (!chip_) {
-        ROS_ERROR("Failed to open GPIO chip: %s", pin_config_.gpio_chip_name.c_str());
-        return false;
+        ROS_WARN("Failed to open GPIO chip: %s - Running in dummy mode", pin_config_.gpio_chip_name.c_str());
+        ROS_INFO("GPIO will operate in simulation mode without actual hardware control");
+        return true;  // 더미 모드로 계속 진행
     }
     
-    // 출력 라인 설정
-    if (!setOutputLine(pin_config_.reverse0_pin, &reverse0_line_)) return false;
-    if (!setOutputLine(pin_config_.reverse1_pin, &reverse1_line_)) return false;
-    if (!setOutputLine(pin_config_.latch_pin, &latch_line_)) return false;
+    // 출력 라인 설정 (실패해도 계속 진행)
+    bool gpio_success = true;
+    if (!setOutputLine(pin_config_.reverse0_pin, &reverse0_line_)) {
+        ROS_WARN("Failed to initialize reverse0 pin %d - will use dummy mode", pin_config_.reverse0_pin);
+        gpio_success = false;
+    }
+    if (!setOutputLine(pin_config_.reverse1_pin, &reverse1_line_)) {
+        ROS_WARN("Failed to initialize reverse1 pin %d - will use dummy mode", pin_config_.reverse1_pin);
+        gpio_success = false;
+    }
+    if (!setOutputLine(pin_config_.latch_pin, &latch_line_)) {
+        ROS_WARN("Failed to initialize latch pin %d - will use dummy mode", pin_config_.latch_pin);
+        gpio_success = false;
+    }
     
-    // 입력 라인 설정  
-    if (!setInputLine(pin_config_.inc_button_pin, &inc_button_line_)) return false;
-    if (!setInputLine(pin_config_.dec_button_pin, &dec_button_line_)) return false;
+    // 입력 라인 설정 (실패해도 계속 진행)
+    if (!setInputLine(pin_config_.inc_button_pin, &inc_button_line_)) {
+        ROS_WARN("Failed to initialize inc_button pin %d - will use dummy mode", pin_config_.inc_button_pin);
+        gpio_success = false;
+    }
+    if (!setInputLine(pin_config_.dec_button_pin, &dec_button_line_)) {
+        ROS_WARN("Failed to initialize dec_button pin %d - will use dummy mode", pin_config_.dec_button_pin);
+        gpio_success = false;
+    }
     
-    // 초기 상태 설정
-    gpiod_line_set_value(reverse0_line_, 1);  // 정방향
-    gpiod_line_set_value(reverse1_line_, 1);  // 정방향
-    gpiod_line_set_value(latch_line_, 1);     // 비활성 상태
+    // 초기 상태 설정 (가능한 라인만)
+    if (reverse0_line_) gpiod_line_set_value(reverse0_line_, 1);  // 정방향
+    if (reverse1_line_) gpiod_line_set_value(reverse1_line_, 1);  // 정방향
+    if (latch_line_) gpiod_line_set_value(latch_line_, 1);       // 비활성 상태
     
-    ROS_INFO("GPIO initialization complete");
-    return true;
+    if (gpio_success) {
+        ROS_INFO("GPIO initialization complete - Hardware mode");
+    } else {
+        ROS_INFO("GPIO initialization complete - Dummy/Simulation mode");
+    }
+    return true;  // 항상 성공으로 처리
 }
 
 bool SPIHardwareNode::initializeSPI() {
     ROS_INFO("Initializing SPI...");
     
-    // 실제 SPI 초기화
-    spi_ = new BitBangSPI(pin_config_.mosi_pin, pin_config_.miso_pin, 
-                         pin_config_.clk_pin, pin_config_.latch_pin,
-                         BitBangSPI::MODE0, pin_config_.spi_speed, false);
-    
-    if (!spi_) {
-        ROS_ERROR("Failed to create SPI controller");
-        return false;
+    // GPIO가 초기화되지 않았으면 SPI도 더미 모드
+    if (!chip_) {
+        ROS_INFO("SPI running in dummy mode (no GPIO chip)");
+        spi_ = nullptr;
+        return true;
     }
     
-    ROS_INFO("SPI initialization complete");
+    // 실제 SPI 초기화 시도
+    try {
+        spi_ = new BitBangSPI(pin_config_.mosi_pin, pin_config_.miso_pin, 
+                             pin_config_.clk_pin, pin_config_.latch_pin,
+                             BitBangSPI::MODE0, pin_config_.spi_speed, false);
+        
+        if (!spi_) {
+            ROS_WARN("Failed to create SPI controller - running in dummy mode");
+            return true;
+        }
+        
+        ROS_INFO("SPI initialization complete - Hardware mode");
+    } catch (const std::exception& e) {
+        ROS_WARN("SPI initialization failed: %s - running in dummy mode", e.what());
+        spi_ = nullptr;
+    }
+    
     return true;
 }
 
 bool SPIHardwareNode::initializeDAC() {
     ROS_INFO("Initializing DAC...");
     
-    // DAC 객체 생성
-    dac0_ = new MCP4921(spi_, pin_config_.ss0_pin);
-    if (!dac0_ || !dac0_->isInitialized()) {
-        ROS_ERROR("Failed to initialize DAC0");
+    // SPI가 없으면 DAC도 더미 모드
+    if (!spi_) {
+        ROS_INFO("DAC running in dummy mode (no SPI)");
+        dac0_ = nullptr;
+        dac1_ = nullptr;
         current_status_.dac0_ok = false;
-        return false;
-    }
-    current_status_.dac0_ok = true;
-    
-    dac1_ = new MCP4921(spi_, pin_config_.ss1_pin);
-    if (!dac1_ || !dac1_->isInitialized()) {
-        ROS_ERROR("Failed to initialize DAC1");
         current_status_.dac1_ok = false;
-        return false;
+        return true;
     }
-    current_status_.dac1_ok = true;
     
-    // 초기 출력값 설정 (정지)
-    dac0_->setOutputPercent(0.0);
-    dac1_->setOutputPercent(0.0);
+    // DAC 객체 생성 시도
+    try {
+        dac0_ = new MCP4921(spi_, pin_config_.ss0_pin);
+        if (!dac0_ || !dac0_->isInitialized()) {
+            ROS_WARN("Failed to initialize DAC0 - running in dummy mode");
+            current_status_.dac0_ok = false;
+            dac0_ = nullptr;
+        } else {
+            current_status_.dac0_ok = true;
+            dac0_->setOutputPercent(0.0);  // 초기 출력값 설정 (정지)
+        }
+        
+        dac1_ = new MCP4921(spi_, pin_config_.ss1_pin);
+        if (!dac1_ || !dac1_->isInitialized()) {
+            ROS_WARN("Failed to initialize DAC1 - running in dummy mode");
+            current_status_.dac1_ok = false;
+            dac1_ = nullptr;
+        } else {
+            current_status_.dac1_ok = true;
+            dac1_->setOutputPercent(0.0);  // 초기 출력값 설정 (정지)
+        }
+        
+        if (current_status_.dac0_ok && current_status_.dac1_ok) {
+            ROS_INFO("DAC initialization complete - Hardware mode");
+        } else {
+            ROS_INFO("DAC initialization complete - Partial/Dummy mode");
+        }
+    } catch (const std::exception& e) {
+        ROS_WARN("DAC initialization failed: %s - running in dummy mode", e.what());
+        dac0_ = nullptr;
+        dac1_ = nullptr;
+        current_status_.dac0_ok = false;
+        current_status_.dac1_ok = false;
+    }
     
-    ROS_INFO("DAC initialization complete");
     return true;
 }
 
@@ -1040,15 +1097,21 @@ int main(int argc, char** argv) {
     ros::NodeHandle nh;
     ros::NodeHandle pnh("~");
     
+    ROS_INFO("=== SPI Hardware Node Starting ===");
+    ROS_INFO("Creating SPI Hardware Node instance...");
+    
     SPIHardwareNode node(nh, pnh);
     
+    ROS_INFO("Initializing SPI Hardware Node...");
     if (!node.initialize()) {
         ROS_ERROR("Failed to initialize SPI Hardware Node");
         return -1;
     }
     
-    ROS_INFO("SPI Hardware Node started successfully");
+    ROS_INFO("=== SPI Hardware Node started successfully ===");
+    ROS_INFO("Node is ready to process motor commands");
     ros::spin();
     
+    ROS_INFO("SPI Hardware Node shutting down...");
     return 0;
 } 

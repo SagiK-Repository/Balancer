@@ -1,0 +1,28 @@
+<?xml version="1.0"?>
+<launch>
+  <!-- 파라미터 로드 -->
+  <rosparam file="$(find balance_robot_nodes)/config/balance_robot_params.yaml" command="load"/>
+
+  <!-- SPI 하드웨어 노드 -->
+  <node name="spi_hardware_node" pkg="balance_robot_nodes" type="spi_hardware_node" output="screen" respawn="true"/>
+
+  <!-- I2C 센서 노드 -->  
+  <node name="i2c_sensor_node" pkg="balance_robot_nodes" type="i2c_sensor_node" output="screen" respawn="true"/>
+
+  <!-- 밸런스 컨트롤러 노드 -->
+  <node name="balance_controller_node" pkg="balance_robot_nodes" type="balance_controller_node" output="screen" respawn="true"/>
+
+  <!-- 토픽 모니터링 -->
+  <node name="motor_status_hz" pkg="rostopic" type="rostopic" args="hz /motor_status" output="screen"/>
+  <node name="sensor_data_hz" pkg="rostopic" type="rostopic" args="hz /sensor_data" output="screen"/>
+  <node name="motor_command_hz" pkg="rostopic" type="rostopic" args="hz /motor_command" output="screen"/>
+  
+  <!-- 노드 상태 모니터링 -->
+  <node name="node_monitor" pkg="rosnode" type="rosnode" args="list" output="screen"/>
+  
+  <!-- 간단한 모터 테스트 명령 (5초 후 시작) -->
+  <node name="motor_test_delayed" pkg="rostopic" type="rostopic" 
+        args="pub -r 1 /motor_command balance_robot_nodes/MotorCommand 
+        '{left_motor: {power: 0.05, direction: true}, right_motor: {power: 0.05, direction: true}, enable: true}'" 
+        output="screen" launch-prefix="bash -c 'sleep 5; $0 $@'"/>
+</launch> 

@@ -1,0 +1,13 @@
+<?xml version="1.0"?>
+<launch>
+  <!-- I2C 센서 노드만 실행 -->
+  <node name="i2c_sensor_node" pkg="balance_robot_nodes" type="i2c_sensor_node" output="screen">
+    <rosparam file="$(find balance_robot_nodes)/config/balance_robot_params.yaml" command="load"/>
+  </node>
+
+  <!-- 센서 데이터 모니터링 -->
+  <node name="sensor_data_monitor" pkg="rostopic" type="rostopic" args="echo /sensor_data" output="screen"/>
+  
+  <!-- 센서 데이터 Hz 확인 -->
+  <node name="sensor_hz_monitor" pkg="rostopic" type="rostopic" args="hz /sensor_data" output="screen"/>
+</launch> 
