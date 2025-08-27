@@ -401,7 +401,7 @@ void MotorController::timerCallback(const ros::TimerEvent& event) {
         }
     } else {
         // 직접 제어 (부드러운 제어 적용)
-        double smooth_output_0 = target_speed_0;
+        /*double smooth_output_0 = target_speed_0;
         double smooth_output_1 = target_speed_1;
         
         // 부드러운 제어 적용
@@ -411,7 +411,42 @@ void MotorController::timerCallback(const ros::TimerEvent& event) {
         }
         
         actual_motor_output_0_ = smooth_output_0;
-        actual_motor_output_1_ = smooth_output_1;
+        actual_motor_output_1_ = smooth_output_1;*/
+        double smooth_output = 0;
+
+        double tilt_yaw = roll_angle;
+
+        if(tilt_yaw < -45){       smooth_output = -22;    //
+        }else if(tilt_yaw < -30){ smooth_output = -17;
+        }else if(tilt_yaw < -15){ smooth_output = -13;
+        }else if(tilt_yaw < -10){ smooth_output = -9;
+        }else if(tilt_yaw < -5){  smooth_output = -5;
+        }else if(tilt_yaw < 0){   smooth_output = -2;
+        }else if(tilt_yaw < 5){   smooth_output = 2;
+        }else if(tilt_yaw < 10){  smooth_output = 5;
+        }else if(tilt_yaw < 15){  smooth_output = 9;
+        }else if(tilt_yaw < 30){  smooth_output = 13;
+        }else if(tilt_yaw < 45){  smooth_output = 17;
+        }else{                    smooth_output = 22;
+        }
+        smooth_output *= 4;
+        /*
+        if(tilt_yaw < -45){       smooth_output = -11;    //
+        }else if(tilt_yaw < -30){ smooth_output = -9;
+        }else if(tilt_yaw < -15){ smooth_output = -7;
+        }else if(tilt_yaw < -10){ smooth_output = -5;
+        }else if(tilt_yaw < -5){  smooth_output = -3;
+        }else if(tilt_yaw < 0){   smooth_output = -2;
+        }else if(tilt_yaw < 5){   smooth_output = 2;
+        }else if(tilt_yaw < 10){  smooth_output = 3;
+        }else if(tilt_yaw < 15){  smooth_output = 5;
+        }else if(tilt_yaw < 30){  smooth_output = 7;
+        }else if(tilt_yaw < 45){  smooth_output = 9;
+        }else{                    smooth_output = 11;
+        }*/
+
+        double smooth_output_0 = smooth_output;
+        double smooth_output_1 = smooth_output;
         
         setMotor0Direction(smooth_output_0 >= 0);
         setMotor0Speed(std::abs(smooth_output_0));
