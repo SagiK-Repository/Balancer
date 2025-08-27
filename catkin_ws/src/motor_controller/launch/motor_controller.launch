@@ -23,13 +23,13 @@
     <param name="dec_button_pin" value="$(arg dec_button_pin)"/>
     <param name="pwm_frequency" value="$(arg pwm_frequency)"/>
     <param name="pwm_range" value="$(arg pwm_range)"/>
-    <param name="max_speed" value="20.0"/>
+    <param name="max_speed" value="100.0"/>
     <param name="gpio_chip_name" value="gpiochip0"/>
     
     <!-- PID 제어 설정 - 진단 모드 -->
-    <param name="use_pid_control" value="true"/>     <!-- PID 제어 비활성화 -->
-    <param name="use_balance_control" value="true"/>  <!-- 밸런스 제어 비활성화 -->
-    <param name="use_smooth_control" value="true"/>   <!-- 부드러운 제어 활성화 -->
+    <param name="use_pid_control" value="false"/>     <!-- PID 제어 비활성화 -->
+    <param name="use_balance_control" value="false"/>  <!-- 밸런스 제어 비활성화 -->
+    <param name="use_smooth_control" value="false"/>   <!-- 부드러운 제어 활성화 -->
     <param name="target_roll_angle" value="0.0"/>
     
     <!-- 부드러운 제어 매개변수 (매우 보수적) -->

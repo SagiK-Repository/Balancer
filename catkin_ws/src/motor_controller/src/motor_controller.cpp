@@ -521,7 +521,7 @@ void MotorController::checkButtons() {
     
     // 증가 버튼 상승 엣지 감지
     if (inc_button_state && !prev_inc_button_state_) {
-        target_speed_0 += 5.0;
+        target_speed_0 += 0.5;
         target_speed_1 = target_speed_0;
         if (target_speed_0 > max_speed_) target_speed_0 = max_speed_;
         ROS_INFO("Speed increased: %.2f", target_speed_0);
@@ -530,7 +530,7 @@ void MotorController::checkButtons() {
     
     // 감소 버튼 상승 엣지 감지
     if (dec_button_state && !prev_dec_button_state_) {
-        target_speed_0 -= 5.0;
+        target_speed_0 -= 0.5;
         target_speed_1 = target_speed_0;
         if (target_speed_0 < -max_speed_) target_speed_0 = -max_speed_;
         ROS_INFO("Speed decreased: %.2f", target_speed_0);
