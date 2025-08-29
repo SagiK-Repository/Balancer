@@ -38,3 +38,4 @@ cicd: ci/cd관련 내용
 | refactor | 함수 입/출력은 동일하나 알고리즘 개선 |
 | style | 함수 기능은 동일하나, 명칭 또는 주석 수정 (+UI 시각적 개선 포함) |
 | feature-C | Feature C, Giho Park |
+Hello someone
