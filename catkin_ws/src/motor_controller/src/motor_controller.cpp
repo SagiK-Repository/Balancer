@@ -7,7 +7,7 @@
 
 // PID 컨트롤러 구현
 PIDController::PIDController(double kp, double ki, double kd, double min_output, double max_output)
-    : kp_(kp), ki_(ki), kd_(kd), 
+    : kp_(2), ki_(2), kd_(2), 
       error_(0.0), prev_error_(0.0), integral_(0.0), derivative_(0.0), output_(0.0),
       min_output_(min_output), max_output_(max_output), 
       integral_max_(std::abs(max_output) * 0.8), // 적분 제한을 최대 출력의 80%로 설정
@@ -218,7 +218,7 @@ MotorController::MotorController(ros::NodeHandle& nh, ros::NodeHandle& pnh)
     sensor_confidence_pub_ = nh_.advertise<std_msgs::Float32>("sensor_confidence", 10);
     
     // 타이머 설정
-    timer0_ = nh_.createTimer(ros::Duration(0.05), &MotorController::timerCallback, this);
+    timer0_ = nh_.createTimer(ros::Duration(0.002), &MotorController::timerCallback, this);
     
     timer1_ = nh_.createTimer(ros::Duration(0.0001), &MotorController::checkHallSensor, this);
     
@@ -362,16 +362,22 @@ void MotorController::timerCallback(const ros::TimerEvent& event) {
     actual_speed0_pub_.publish(speed0_msg);
     actual_speed1_pub_.publish(speed1_msg);
     
-    double sensors[7];
-    i2c.getData(sensors,sensors+6);
+    double sensors[13];
+    i2c.getData(sensors,sensors+11);
 
     // 지면과의 각도 계산 및 출력
     double roll_angle = i2c.getRoll();           // 즉시 응답 각도
     double pitch_angle = i2c.getPitch();
     double yaw_angle = i2c.getYaw();
+    // ROS_INFO("Tilt R/P: %.1f/%.1f [%.1f %.1f %.1f %.1f %.1f %.1f]",(float)roll_angle, (float)pitch_angle, (float)sensors[0], (float)sensors[1], (float)sensors[2], (float)sensors[3], (float)sensors[4], (float)sensors[5]);
+    /*ROS_INFO("acc(%4.1f) | gyro(%4.1f) | sangbo(%4.1f) | acc_angle: %4.1f"
+        , (float)sensors[0]
+        , (float)sensors[3]
+        , (float)sensors[6]
+        ,(float)roll_angle);*/
     
     // 최적화된 안정화 각도
-    double stable_roll = i2c.getStableRoll();    // 안정화된 각도
+    double stable_roll = sensors[6];//i2c.getStableRoll();    // 안정화된 각도
     double stable_pitch = i2c.getStablePitch();
     bool is_stable = i2c.isStable();
     
@@ -396,12 +402,12 @@ void MotorController::timerCallback(const ros::TimerEvent& event) {
             applyBalanceOutput();
         } else {
             // 속도 제어: 기존 방식
-            updatePIDControl();
+            updatePIDControl(0.0f,sensors[6]);
             applyPIDOutput();
         }
     } else {
         // 직접 제어 (부드러운 제어 적용)
-        double smooth_output_0 = target_speed_0;
+        /*double smooth_output_0 = target_speed_0;
         double smooth_output_1 = target_speed_1;
         
         // 부드러운 제어 적용
@@ -411,12 +417,77 @@ void MotorController::timerCallback(const ros::TimerEvent& event) {
         }
         
         actual_motor_output_0_ = smooth_output_0;
-        actual_motor_output_1_ = smooth_output_1;
+        actual_motor_output_1_ = smooth_output_1;*/
+
         
-        setMotor0Direction(smooth_output_0 >= 0);
-        setMotor0Speed(std::abs(smooth_output_0));
+        double smooth_output = 0;
+        
+        const int roll_avg_size = 100;
+        static double roll_avg[roll_avg_size] = {0,};
+        static int roll_avg_index = 0;
+        static int prev_roll_avg = 0;
+
+        double roll_angle_temp = roll_angle;
+        if(std::abs(roll_angle - prev_roll_avg) > 15) roll_avg_index = 0;
+        else if(roll_angle_temp > 50)                 roll_angle_temp = 0;
+        else if(roll_angle_temp < -50)                roll_angle_temp = 0;
+        else {
+            roll_avg[roll_avg_index++] = roll_angle_temp;
+        }
+                
+        if(roll_avg_index >= roll_avg_size) roll_avg_index = 0;
+
+        double roll_avg_sum = 0;
+
+        for(int i = 0; i < roll_avg_size; i++){
+            roll_avg_sum += roll_avg[i];
+        }
+        double roll_avg_avg = roll_avg_sum / roll_avg_size;
+
+        prev_roll_avg = roll_avg_avg;
+        /*
+        double tilt_yaw = roll_avg_avg;
+
+        if(tilt_yaw < -45){       smooth_output = -22;    //
+        }else if(tilt_yaw < -30){ smooth_output = -17;
+        }else if(tilt_yaw < -15){ smooth_output = -13;
+        }else if(tilt_yaw < -10){ smooth_output = -9;
+        }else if(tilt_yaw < -5){  smooth_output = -5;
+        }else if(tilt_yaw < 0){   smooth_output = -2;
+        }else if(tilt_yaw < 5){   smooth_output = 2;
+        }else if(tilt_yaw < 10){  smooth_output = 5;
+        }else if(tilt_yaw < 15){  smooth_output = 9;
+        }else if(tilt_yaw < 30){  smooth_output = 13;
+        }else if(tilt_yaw < 45){  smooth_output = 17;
+        }else{                    smooth_output = 22;
+        }
+        smooth_output *= 3;
+
+        */
+       smooth_output = std::pow(roll_avg_avg,1)/*/33*/;//std::tanh(roll_avg_avg/20)*100;
+
+        /*
+        if(tilt_yaw < -45){       smooth_output = -11;    //
+        }else if(tilt_yaw < -30){ smooth_output = -9;
+        }else if(tilt_yaw < -15){ smooth_output = -7;
+        }else if(tilt_yaw < -10){ smooth_output = -5;
+        }else if(tilt_yaw < -5){  smooth_output = -3;
+        }else if(tilt_yaw < 0){   smooth_output = -2;
+        }else if(tilt_yaw < 5){   smooth_output = 2;
+        }else if(tilt_yaw < 10){  smooth_output = 3;
+        }else if(tilt_yaw < 15){  smooth_output = 5;
+        }else if(tilt_yaw < 30){  smooth_output = 7;
+        }else if(tilt_yaw < 45){  smooth_output = 9;
+        }else{                    smooth_output = 11;
+        }*/
+
+        double smooth_output_0 = smooth_output;
+        double smooth_output_1 = smooth_output;
+        
+        /*setMotor0Direction(smooth_output_0 >= 0);
+        setMotor0Speed(std::abs(smooth_output_0)+5);
         setMotor1Direction(smooth_output_1 >= 0);
-        setMotor1Speed(std::abs(smooth_output_1));
+        setMotor1Speed(std::abs(smooth_output_1)+5);*/
     }
     
     // 신뢰도 정보 가져오기
@@ -437,6 +508,18 @@ void MotorController::timerCallback(const ros::TimerEvent& event) {
                 pid_balance_.getError(),
                 sensors[6]);
         } else {
+            ROS_INFO("acc(%4.1f) | gyro(%4.1f) | sangbo(%4.1f) | acc_angle: %4.1f | PID Out: [%.1f,%.1f] | Motor Out: [%.1f,%.1f] | Err: [%.1f,%.1f]"
+        , (float)sensors[0]
+        , (float)sensors[3]
+        , (float)sensors[6]
+        ,(float)roll_angle
+        ,(float)pid_output_0_
+        ,(float)pid_output_1_
+        ,(float)actual_motor_output_0_
+        ,(float)actual_motor_output_1_
+        ,(float)pid_motor0_.getError()
+        ,(float)pid_motor1_.getError());
+        /*
             ROS_INFO("Tilt R/P: %.1f/%.1f deg %s(%.0f%%) | Speed T/A: [%.1f,%.1f]/[%.1f,%.1f] | PID Out: [%.1f,%.1f] | Motor Out: [%.1f,%.1f] | Err: [%.1f,%.1f] | Temp: %.1f C",
                 display_roll, display_pitch, 
                 is_stable ? "[STABLE] " : "[MOVING] ",
@@ -446,6 +529,7 @@ void MotorController::timerCallback(const ros::TimerEvent& event) {
                 actual_motor_output_0_, actual_motor_output_1_,
                 pid_motor0_.getError(), pid_motor1_.getError(),
                 sensors[6]);
+                */
         }
     } else {
         ROS_INFO("Tilt R/P: %.1f/%.1f deg %s(%.0f%%) | Speed T/A: [%.1f,%.1f]/[%.1f,%.1f] | RAW Mode | Motor Out: [%.1f,%.1f] | Temp: %.1f C",
@@ -521,7 +605,7 @@ void MotorController::checkButtons() {
     
     // 증가 버튼 상승 엣지 감지
     if (inc_button_state && !prev_inc_button_state_) {
-        target_speed_0 += 5.0;
+        target_speed_0 += 0.5;
         target_speed_1 = target_speed_0;
         if (target_speed_0 > max_speed_) target_speed_0 = max_speed_;
         ROS_INFO("Speed increased: %.2f", target_speed_0);
@@ -530,7 +614,7 @@ void MotorController::checkButtons() {
     
     // 감소 버튼 상승 엣지 감지
     if (dec_button_state && !prev_dec_button_state_) {
-        target_speed_0 -= 5.0;
+        target_speed_0 -= 0.5;
         target_speed_1 = target_speed_0;
         if (target_speed_0 < -max_speed_) target_speed_0 = -max_speed_;
         ROS_INFO("Speed decreased: %.2f", target_speed_0);
@@ -576,7 +660,7 @@ void MotorController::setMotor1Speed(float speed) {
     // DAC 출력 설정
     dac1_->setOutputPercent(speed_percent);
 }
-void MotorController::updatePIDControl() {
+void MotorController::updatePIDControl(double target, double actual) {
     ros::Time current_time = ros::Time::now();
     double dt = (current_time - last_pid_time_).toSec();
     
@@ -587,8 +671,8 @@ void MotorController::updatePIDControl() {
     }
     
     // PID 계산
-    pid_output_0_ = pid_motor0_.compute(target_speed_0, actual_speed_0, dt);
-    pid_output_1_ = pid_motor1_.compute(target_speed_1, actual_speed_1, dt);
+    pid_output_0_ = pid_motor0_.compute(target, actual, dt);
+    pid_output_1_ = pid_output_0_;
     
     last_pid_time_ = current_time;
 }
@@ -608,16 +692,16 @@ void MotorController::applyPIDOutput() {
     double compensated_speed_1 = compensateDeadzone(std::abs(controlled_output_1));
     
     // 실제 모터 출력값 저장 (로그용)
-    actual_motor_output_0_ = (controlled_output_0 >= 0) ? compensated_speed_0 : -compensated_speed_0;
-    actual_motor_output_1_ = (controlled_output_1 >= 0) ? compensated_speed_1 : -compensated_speed_1;
+    actual_motor_output_0_ = pid_output_0_ * (-30.0f);//(controlled_output_0 >= 0) ? compensated_speed_0 : -compensated_speed_0;
+    actual_motor_output_1_ = pid_output_1_ * (-30.0f);//(controlled_output_1 >= 0) ? compensated_speed_1 : -compensated_speed_1;
     
     // 모터 0 제어
-    setMotor0Direction(controlled_output_0 >= 0);
-    setMotor0Speed(compensated_speed_0);
+    setMotor0Direction(actual_motor_output_0_ >= 0);
+    setMotor0Speed(std::abs(actual_motor_output_0_));
     
     // 모터 1 제어
-    setMotor1Direction(controlled_output_1 >= 0);
-    setMotor1Speed(compensated_speed_1);
+    setMotor1Direction(actual_motor_output_1_ >= 0);
+    setMotor1Speed(std::abs(actual_motor_output_1_));
 }
 void MotorController::resetPIDControllers() {
     pid_motor0_.reset();
@@ -755,8 +839,8 @@ double MotorController::applyDirectionChangeControl(double output, int motor_id)
         // 브레이킹 시작
         is_braking = true;
         brake_start_time = current_time;
-        ROS_INFO("Motor %d: Direction change detected, starting brake (%.1f -> %.1f)", 
-                 motor_id, prev_output, output);
+        /*ROS_INFO("Motor %d: Direction change detected, starting brake (%.1f -> %.1f)", 
+                 motor_id, prev_output, output);*/
         
         // 이전 출력값 업데이트
         if (motor_id == 0) prev_output_0_ = output;
@@ -775,7 +859,7 @@ double MotorController::applyDirectionChangeControl(double output, int motor_id)
         } else {
             // 브레이킹 종료
             is_braking = false;
-            ROS_INFO("Motor %d: Brake finished, resuming with output %.1f", motor_id, output);
+            //ROS_INFO("Motor %d: Brake finished, resuming with output %.1f", motor_id, output);
         }
     }
     

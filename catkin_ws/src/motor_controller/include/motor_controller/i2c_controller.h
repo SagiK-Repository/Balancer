@@ -92,6 +92,9 @@ private:
     int stable_count_;                    // 안정 상태 카운터
     bool is_stable_;                      // 현재 안정 상태 여부
     
+    // 시간 추적
+    ros::Time last_time_;                 // 이전 측정 시간
+    
 public:
     I2CController();
     ~I2CController();

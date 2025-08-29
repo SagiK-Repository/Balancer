@@ -77,7 +77,7 @@ class MotorController { public:
     void updateActualSpeed();
     
     // PID 제어 함수들
-    void updatePIDControl();
+    void updatePIDControl(double target, double actual);
     void applyPIDOutput();
     void resetPIDControllers();
     

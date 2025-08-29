@@ -1,0 +1,31 @@
+<?xml version="1.0"?>
+<!-- 하드웨어 노드만 테스트하는 런치 파일 -->
+<launch>
+  <!-- 인수 정의 -->
+  <arg name="config_file" default="$(find balance_robot_nodes)/config/balance_robot_params.yaml" />
+  <arg name="log_level" default="INFO" />
+  
+  <!-- 매개변수 로드 -->
+  <rosparam file="$(arg config_file)" command="load" />
+  
+  <!-- SPI Hardware Node -->
+  <node name="spi_hardware_node" pkg="balance_robot_nodes" type="spi_hardware_node" output="screen">
+    <param name="log_level" value="$(arg log_level)" />
+    <remap from="motor_command" to="/balance_robot/motor_command" />
+    <remap from="motor_status" to="/balance_robot/motor_status" />
+    <remap from="motor0_speed" to="/balance_robot/motor0_speed" />
+    <remap from="motor1_speed" to="/balance_robot/motor1_speed" />
+  </node>
+  
+  <!-- I2C Sensor Node -->
+  <node name="i2c_sensor_node" pkg="balance_robot_nodes" type="i2c_sensor_node" output="screen">
+    <param name="log_level" value="$(arg log_level)" />
+    <remap from="sensor_data" to="/balance_robot/sensor_data" />
+    <remap from="imu/data" to="/balance_robot/imu/data" />
+    <remap from="imu/temperature" to="/balance_robot/imu/temperature" />
+    <remap from="sensor_roll" to="/balance_robot/sensor_roll" />
+    <remap from="sensor_pitch" to="/balance_robot/sensor_pitch" />
+    <remap from="sensor_confidence" to="/balance_robot/sensor_confidence" />
+  </node>
+  
+</launch> 

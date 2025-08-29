@@ -22,7 +22,8 @@ I2CController::I2CController() :
     stable_pitch_(0.0),
     prev_accel_magnitude_(9.81),
     stable_count_(0),
-    is_stable_(true)
+    is_stable_(true),
+    last_time_(ros::Time::now())
 {
     // 이동 평균 버퍼 초기화
     for(int i = 0; i < FILTER_SIZE; i++) {
@@ -165,7 +166,7 @@ bool I2CController::readSensorData(SensorData& data) {
 void I2CController::calibrateSensor() {
     ROS_INFO("Calibrating GY-521 sensor... Keep the sensor still for 5 seconds!");
     
-    const int samples = 200;  // 더 많은 샘플로 정확도 향상
+    const int samples = 100;  // 더 많은 샘플로 정확도 향상
     double accel_x_sum = 0, accel_y_sum = 0, accel_z_sum = 0;
     double gyro_x_sum = 0, gyro_y_sum = 0, gyro_z_sum = 0;
     
@@ -241,9 +242,9 @@ bool I2CController::getData(double* p_accel_gyro_xyz, double* p_temperature) {
     double accel_y = (data.accel_y - accel_offset_y) / accel_scale * 9.81;
     double accel_z = (data.accel_z - accel_offset_z) / accel_scale * 9.81;
     
-    double gyro_x = (data.gyro_x - gyro_offset_x) / gyro_scale * 180.0 / M_PI;
-    double gyro_y = (data.gyro_y - gyro_offset_y) / gyro_scale * 180.0 / M_PI;
-    double gyro_z = (data.gyro_z - gyro_offset_z) / gyro_scale * 180.0 / M_PI;
+    double gyro_x = (data.gyro_x - gyro_offset_x) / 131.0;//gyro_scale * 180.0 / M_PI;
+    double gyro_y = (data.gyro_y - gyro_offset_y) / 131.0;//gyro_scale * 180.0 / M_PI;
+    double gyro_z = (data.gyro_z - gyro_offset_z) / 131.0;//gyro_scale * 180.0 / M_PI;
     
     double temperature = convertTempData(data.temp);
     
@@ -251,15 +252,52 @@ bool I2CController::getData(double* p_accel_gyro_xyz, double* p_temperature) {
     double motion_confidence = analyzeMotionConfidence(accel_x, accel_y, accel_z, gyro_x, gyro_y, gyro_z);
     current_confidence_ = motion_confidence;
     
+    ros::Time current_time = ros::Time::now();
+    double dt;
+    double dt_microseconds;
+    
+    // 첫 번째 호출인지 확인 (last_time_이 0인 경우)
+    if (last_time_.toSec() == 0.0) {
+        last_time_ = current_time;
+        dt = 0.002; // 기본값 1ms
+        dt_microseconds = 2000.0;
+    } else {
+        ros::Duration elapsed = current_time - last_time_;
+        dt = elapsed.toSec();
+        
+        // 마이크로초 단위로도 계산 (디버깅용)
+        dt_microseconds = (double) elapsed.toNSec() / 1000.0;  // 나노초를 마이크로초로 변환
+        
+        last_time_ = current_time;
+    }
+    /*ROS_INFO("last_time %4.1f |dt %4.1f |dt_us %4.1f"
+        ,last_time_.toSec(),dt,dt_microseconds);*/
+    
     // 최적화된 기울기 계산
     calculateOptimalTilt(accel_x, accel_y, accel_z);
     
+
+    float alpha = 0.96;
+
+    static double gyro_x_filtered;
+    static double gyro_y_filtered;
+    static double gyro_z_filtered;
+    gyro_x_filtered = alpha * (gyro_x_filtered+gyro_x*dt) + (1.f - alpha) * current_angles_.roll;
+    gyro_y_filtered = alpha * (gyro_y_filtered+gyro_y*dt) + (1.f - alpha) * current_angles_.pitch;
+    gyro_z_filtered = alpha * (gyro_z_filtered+gyro_z*dt) + (1.f - alpha) * current_angles_.yaw;
+     
+
     p_accel_gyro_xyz[0] = accel_x;
     p_accel_gyro_xyz[1] = accel_y;
     p_accel_gyro_xyz[2] = accel_z;
     p_accel_gyro_xyz[3] = gyro_x;
     p_accel_gyro_xyz[4] = gyro_y;
     p_accel_gyro_xyz[5] = gyro_z;
+    p_accel_gyro_xyz[6] = gyro_x_filtered;
+    p_accel_gyro_xyz[7] = gyro_y_filtered;
+    p_accel_gyro_xyz[8] = gyro_z_filtered;
+    p_accel_gyro_xyz[9] = dt;  // 초 단위
+    p_accel_gyro_xyz[10] = dt_microseconds;  // 마이크로초 단위
     
     p_temperature[0] = temperature;
 
