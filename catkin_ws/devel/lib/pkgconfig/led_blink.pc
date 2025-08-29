@@ -1,8 +1,0 @@
-prefix=/home/tbot3/catkin_ws/devel
-
-Name: led_blink
-Description: Description of led_blink
-Version: 0.0.1
-Cflags: 
-Libs: -L${prefix}/lib 
-Requires: 

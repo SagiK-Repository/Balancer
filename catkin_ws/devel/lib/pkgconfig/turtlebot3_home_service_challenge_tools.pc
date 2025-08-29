@@ -1,8 +1,0 @@
-prefix=/home/tbot3/catkin_ws/devel
-
-Name: turtlebot3_home_service_challenge_tools
-Description: Description of turtlebot3_home_service_challenge_tools
-Version: 0.0.1
-Cflags: -I/home/tbot3/catkin_ws/src/turtlebot3_home_service_challenge/turtlebot3_home_service_challenge_tools/include
-Libs: -L${prefix}/lib 
-Requires: roscpp rospy sensor_msgs
