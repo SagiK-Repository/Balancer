@@ -1,0 +1,16 @@
+<?xml version="1.0"?>
+<launch>
+  <!-- SPI 하드웨어 노드만 실행 -->
+  <node name="spi_hardware_node" pkg="balance_robot_nodes" type="spi_hardware_node" output="screen">
+    <rosparam file="$(find balance_robot_nodes)/config/balance_robot_params.yaml" command="load"/>
+  </node>
+
+  <!-- 모터 상태 모니터링 -->
+  <node name="motor_status_monitor" pkg="rostopic" type="rostopic" args="echo /motor_status" output="screen"/>
+  
+  <!-- 모터 명령 테스트 (간단한 테스트 신호 발행) -->
+  <node name="motor_test_publisher" pkg="rostopic" type="rostopic" 
+        args="pub -r 10 /motor_command balance_robot_nodes/MotorCommand 
+        '{left_motor: {power: 0.1, direction: true}, right_motor: {power: 0.1, direction: true}, enable: true}'" 
+        output="screen"/>
+</launch> 

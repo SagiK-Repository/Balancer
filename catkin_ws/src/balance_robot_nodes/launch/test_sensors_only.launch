@@ -1,0 +1,21 @@
+<?xml version="1.0"?>
+<!-- 센서 테스트 전용 런치 파일 -->
+<launch>
+  <!-- 매개변수 로드 -->
+  <rosparam file="$(find balance_robot_nodes)/config/balance_robot_params.yaml" command="load" />
+  
+  <!-- I2C Sensor Node만 실행 -->
+  <node name="i2c_sensor_node" pkg="balance_robot_nodes" type="i2c_sensor_node" output="screen">
+    <param name="log_level" value="DEBUG" />
+  </node>
+  
+  <!-- 센서 데이터 모니터링 -->
+  <node name="sensor_data_echo" pkg="rostopic" type="rostopic" args="echo /sensor_data" />
+  <node name="roll_angle_echo" pkg="rostopic" type="rostopic" args="echo /sensor_roll" />
+  <node name="pitch_angle_echo" pkg="rostopic" type="rostopic" args="echo /sensor_pitch" />
+  
+  <!-- 실시간 플롯 -->
+  <node name="rqt_plot_angles" pkg="rqt_plot" type="rqt_plot" 
+        args="/sensor_roll/data /sensor_pitch/data /sensor_confidence/data" />
+  
+</launch> 

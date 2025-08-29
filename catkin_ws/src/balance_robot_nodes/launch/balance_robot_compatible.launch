@@ -1,0 +1,66 @@
+<?xml version="1.0"?>
+<!-- 기존 motor_controller와 호환되는 밸런싱 로봇 런치 파일 -->
+<launch>
+  <!-- 인수 정의 -->
+  <arg name="config_file" default="$(find balance_robot_nodes)/config/balance_robot_params.yaml" />
+  <arg name="enable_hardware" default="true" />
+  <arg name="enable_sensors" default="true" />
+  <arg name="enable_controller" default="true" />
+  <arg name="log_level" default="INFO" />
+  
+  <!-- 매개변수 로드 -->
+  <rosparam file="$(arg config_file)" command="load" />
+  
+  <!-- SPI Hardware Node (네임스페이스 없음) -->
+  <group if="$(arg enable_hardware)">
+    <node name="spi_hardware_node" pkg="balance_robot_nodes" type="spi_hardware_node" output="screen">
+      <param name="log_level" value="$(arg log_level)" />
+      <!-- 기존 motor_controller와 호환되는 토픽 이름 -->
+      <remap from="motor_command" to="motor_command" />
+      <remap from="motor_status" to="motor_status" />
+      <remap from="motor0_speed" to="actual_speed0" />
+      <remap from="motor1_speed" to="actual_speed1" />
+    </node>
+  </group>
+  
+  <!-- I2C Sensor Node (네임스페이스 없음) -->
+  <group if="$(arg enable_sensors)">
+    <node name="i2c_sensor_node" pkg="balance_robot_nodes" type="i2c_sensor_node" output="screen">
+      <param name="log_level" value="$(arg log_level)" />
+      <!-- 기존 motor_controller와 호환되는 토픽 이름 -->
+      <remap from="sensor_data" to="sensor_data" />
+      <remap from="imu/data" to="imu/data" />
+      <remap from="imu/temperature" to="imu/temperature" />
+      <remap from="sensor_roll" to="sensor_roll" />
+      <remap from="sensor_pitch" to="sensor_pitch" />
+      <remap from="sensor_confidence" to="sensor_confidence" />
+    </node>
+  </group>
+  
+  <!-- Motor Controller Bridge (기존 호환성) -->
+  <node name="motor_controller_bridge" pkg="balance_robot_nodes" type="motor_controller_bridge" output="screen">
+    <param name="log_level" value="$(arg log_level)" />
+  </node>
+
+  <!-- Balance Controller Node (네임스페이스 없음) -->
+  <group if="$(arg enable_controller)">
+    <node name="balance_controller_node" pkg="balance_robot_nodes" type="balance_controller_node" output="screen">
+      <param name="log_level" value="$(arg log_level)" />
+      <!-- 기존 motor_controller와 호환되는 토픽 이름 -->
+      <remap from="motor_status" to="motor_status" />
+      <remap from="sensor_data" to="sensor_data" />
+      <remap from="motor_command" to="motor_command" />
+      <remap from="controller_status" to="controller_status" />
+      <remap from="system_ready" to="system_ready" />
+      <remap from="target_speed0" to="target_speed0" />
+      <remap from="target_speed1" to="target_speed1" />
+      <remap from="cmd_vel" to="cmd_vel" />
+      <remap from="emergency_stop" to="emergency_stop" />
+    </node>
+  </group>
+  
+  <!-- 토픽 모니터링 -->
+  <node name="motor_status_echo" pkg="rostopic" type="rostopic" args="echo motor_status" output="screen" />
+  <node name="sensor_data_echo" pkg="rostopic" type="rostopic" args="echo sensor_data" output="screen" />
+  
+</launch> 
