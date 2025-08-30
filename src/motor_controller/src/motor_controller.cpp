@@ -120,9 +120,9 @@ MotorController::MotorController(ros::NodeHandle& nh, ros::NodeHandle& pnh)
     pnh_.param("pid_kd_motor1", kd1, 0.1);
     
     // 밸런싱 PID 게인 파라미터
-    pnh_.param("pid_kp_balance", kp_bal, 15.0);
+    pnh_.param("pid_kp_balance", kp_bal, 2.0);
     pnh_.param("pid_ki_balance", ki_bal, 2.0);
-    pnh_.param("pid_kd_balance", kd_bal, 0.5);
+    pnh_.param("pid_kd_balance", kd_bal, 2.0);
     
     // PID 제어 모드 파라미터
     pnh_.param("use_pid_control", use_pid_control_, true);
@@ -138,6 +138,15 @@ MotorController::MotorController(ros::NodeHandle& nh, ros::NodeHandle& pnh)
     pnh_.param("brake_zone_threshold", brake_zone_threshold_, 10.0);
     pnh_.param("brake_duration", brake_duration_, 0.1);
     
+    ROS_INFO("kp0: %f, ki0: %f, kd0: %f", kp0, ki0, kd0);
+    ROS_INFO("kp1: %f, ki1: %f, kd1: %f", kp1, ki1, kd1);
+    ROS_INFO("kp_bal: %f, ki_bal: %f, kd_bal: %f", kp_bal, ki_bal, kd_bal);
+    ROS_INFO("use_pid_control: %s, use_balance_control: %s", use_pid_control_ ? "ENABLED" : "DISABLED", use_balance_control_ ? "ENABLED" : "DISABLED");
+    ROS_INFO("target_roll_angle: %f", target_roll_);
+    ROS_INFO("use_smooth_control: %s", use_smooth_control_ ? "ENABLED" : "DISABLED");
+    ROS_INFO("motor_deadzone: %f, deadzone_compensation: %f", motor_deadzone_, deadzone_compensation_);
+    ROS_INFO("brake_zone_threshold: %f, brake_duration: %f", brake_zone_threshold_, brake_duration_);
+
     // PID 게인 설정
     pid_motor0_.setGains(kp0, ki0, kd0);
     pid_motor1_.setGains(kp1, ki1, kd1);
@@ -392,7 +401,11 @@ void MotorController::timerCallback(const ros::TimerEvent& event) {
     sensor_confidence_pub_.publish(confidence_msg);
     
     // 현재 Roll 각도 업데이트 (IMU 데이터 읽은 후)
-    current_roll_ = is_stable ? stable_roll : roll_angle;
+    //current_roll_ = is_stable ? stable_roll : roll_angle;
+
+    // 상보 필터를 출력으로 사용
+    target_roll_ = 0;
+    current_roll_ = sensors[6];
     
     // 제어 모드에 따른 처리
     if (use_pid_control_) {
@@ -499,14 +512,23 @@ void MotorController::timerCallback(const ros::TimerEvent& event) {
     
     if (use_pid_control_) {
         if (use_balance_control_) {
-            ROS_INFO("Tilt R/P: %.1f/%.1f deg %s(%.0f%%) | Target/Current Roll: %.1f/%.1f | Balance Out: %.1f | Motor Out: [%.1f,%.1f] | Err: %.1f | Temp: %.1f C",
+            /*ROS_INFO("Tilt R/P: %.1f/%.1f deg %s(%.0f%%) | Target/Current Roll: %.1f/%.1f | Balance Out: %.1f | Motor Out: [%.1f,%.1f] | Err: %.1f | Temp: %.1f C",
                 display_roll, display_pitch, 
                 is_stable ? "[STABLE] " : "[MOVING] ",
                 tilt_confidence,
                 target_roll_, current_roll_, balance_output_,
                 actual_motor_output_0_, actual_motor_output_1_,
                 pid_balance_.getError(),
-                sensors[6]);
+                sensors[6]);*/
+                
+            ROS_INFO("sangbo(%4.1f) | acc_angle: %4.1f | target/actual : %4.1f/%4.1f | PID Out: [%.1f] | Motor Out: [%.1f] | Err: [%.1f]"
+                , (float)sensors[6]
+                ,(float)roll_angle
+                ,(float)target_roll_
+                ,(float)current_roll_
+                ,(float)balance_output_
+                ,(float)actual_motor_output_0_
+                ,(float)pid_balance_.getError());
         } else {
             ROS_INFO("acc(%4.1f) | gyro(%4.1f) | sangbo(%4.1f) | acc_angle: %4.1f | PID Out: [%.1f,%.1f] | Motor Out: [%.1f,%.1f] | Err: [%.1f,%.1f]"
         , (float)sensors[0]
@@ -720,10 +742,11 @@ void MotorController::updateBalanceControl() {
     double dt = (current_time - last_pid_time_).toSec();
     
     // 유효한 시간 간격인지 확인 (1ms ~ 1s)
-    if (dt < 0.001 || dt > 1.0) {
+    if (dt < 0.0001 || dt > 1.0) {
         last_pid_time_ = current_time;
         return;
     }
+
     
     // 밸런싱 PID 계산: 목표 Roll(0.0) vs 현재 Roll
     balance_output_ = pid_balance_.compute(target_roll_, current_roll_, dt);
@@ -734,18 +757,22 @@ void MotorController::updateBalanceControl() {
 void MotorController::applyBalanceOutput() {
     // 방향 전환 제어 적용 (양쪽 모터 동일한 출력)
     double controlled_output = applyDirectionChangeControl(balance_output_, 0);
-    
+
+    controlled_output = balance_output_;
+
+    /*
     // 부드러운 제어 적용 (밸런싱 시에는 양쪽 모터 동일)
     if (use_smooth_control_) {
         controlled_output = applySmoothControl(controlled_output, 0);
     }
+        */
     
     // 밸런싱 출력을 양쪽 모터에 동일하게 적용
     double motor_speed = std::abs(controlled_output);
     bool forward = (controlled_output < 0);
     
     // 데드존 보상 적용
-    motor_speed = compensateDeadzone(motor_speed);
+    //motor_speed = compensateDeadzone(motor_speed);
     
     // 실제 모터 출력값 저장 (로그용) - 양쪽 모터 동일
     actual_motor_output_0_ = forward ? motor_speed : -motor_speed;
