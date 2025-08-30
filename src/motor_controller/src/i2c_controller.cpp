@@ -284,7 +284,7 @@ bool I2CController::getData(double* p_accel_gyro_xyz, double* p_temperature) {
     static double gyro_z_filtered;
     gyro_x_filtered = alpha * (gyro_x_filtered+gyro_x*dt) + (1.f - alpha) * current_angles_.roll;
     gyro_y_filtered = alpha * (gyro_y_filtered+gyro_y*dt) + (1.f - alpha) * current_angles_.pitch;
-    gyro_z_filtered = alpha * (gyro_z_filtered+gyro_z*dt) + (1.f - alpha) * current_angles_.yaw;
+    gyro_z_filtered = (gyro_z_filtered+gyro_z*dt);
      
 
     p_accel_gyro_xyz[0] = accel_x;
@@ -312,10 +312,10 @@ void I2CController::calculateOptimalTilt(double accel_x, double accel_y, double 
     double gravity_magnitude = sqrt(accel_x*accel_x + accel_y*accel_y + accel_z*accel_z);
     
     // 중력 크기가 너무 비정상적이면 이전 값 유지
-    if (gravity_magnitude < 5.0 || gravity_magnitude > 15.0) {
+    /*if (gravity_magnitude < 5.0 || gravity_magnitude > 15.0) {
         ROS_WARN("Abnormal gravity reading: %.2f m/s² - keeping previous values", gravity_magnitude);
         return;
-    }
+    }*/
     
     double norm_x = accel_x / gravity_magnitude;
     double norm_y = accel_y / gravity_magnitude; 

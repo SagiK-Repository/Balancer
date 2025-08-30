@@ -7,7 +7,6 @@
 #include "motor_controller/mcp4921.h"
 #include "motor_controller/i2c_controller.h"
 #include "motor_controller/HallSensorEncoder.h"
-#include "motor_controller/smooth_motor_controller.h"
 #include <string>
 #include <gpiod.h>
 
@@ -23,7 +22,7 @@ public:
     void setGains(double kp, double ki, double kd);
     void setOutputLimits(double min_output, double max_output);
     void reset();
-    double compute(double setpoint, double measured_value, double dt);
+    double compute(double setpoint, double measured_value, double gyro_x, double dt);
     
     // PID 상태 접근자
     double getError() const { return error_; }
@@ -76,24 +75,9 @@ class MotorController { public:
     void setMotor1Speed(float speed_percent);
     void updateActualSpeed();
     
-    // PID 제어 함수들
-    void updatePIDControl(double target, double actual);
-    void applyPIDOutput();
-    void resetPIDControllers();
-    
     // 밸런싱 제어 함수들
-    void updateBalanceControl();
+    void updateBalanceControl(double gyro_x);
     void applyBalanceOutput();
-    
-    // 데드존 보상 함수
-    double compensateDeadzone(double speed);
-    
-    // 방향 전환 제어 함수
-    double applyDirectionChangeControl(double output, int motor_id);
-    bool isDirectionChange(double current_output, double prev_output);
-    
-    // 부드러운 제어 함수
-    double applySmoothControl(double target_output, int motor_id);
     
     // GPIO 초기화 및 정리
     bool setOutputLine(int pin,struct gpiod_line** pline);
@@ -183,7 +167,6 @@ class MotorController { public:
     // 밸런싱 제어 변수
     double target_roll_;    // 목표 Roll 각도 (보통 0.0)
     double current_roll_;   // 현재 Roll 각도
-    bool use_balance_control_;  // true: 밸런싱 제어, false: 속도 제어
     
     // 실제 모터 출력값 (로그용)
     double actual_motor_output_0_;
@@ -203,12 +186,5 @@ class MotorController { public:
     bool is_braking_0_;             // 모터 0 브레이킹 상태
     bool is_braking_1_;             // 모터 1 브레이킹 상태
     
-    // Raw 제어 모드
-    bool use_pid_control_;  // true: PID 제어, false: 직접 제어
-    
-    // 부드러운 모터 제어
-    SmoothMotorController smooth_motor0_;
-    SmoothMotorController smooth_motor1_;
-    bool use_smooth_control_;  // true: 부드러운 제어, false: 기본 제어
 };
 #endif // MOTOR_CONTROLLER_H

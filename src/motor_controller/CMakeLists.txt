@@ -145,10 +145,6 @@ add_library(HallSensorEncoder
   src/HallSensorEncoder.cpp
 )
 
-add_library(smooth_motor_controller
-  src/smooth_motor_controller.cpp
-)
-
 
 ## Add cmake target dependencies of the library
 ## as an example, code may need to be generated before libraries
@@ -192,27 +188,10 @@ target_link_libraries(${PROJECT_NAME}_node
   spi_controller
   i2c_controller
   HallSensorEncoder
-  smooth_motor_controller
   pthread
   rt
   gpiod
 )
-
-add_executable(test_pid_control src/test_pid_control.cpp)
-target_link_libraries(test_pid_control ${catkin_LIBRARIES})
-
-add_executable(motor_response_test src/motor_response_test.cpp)
-target_link_libraries(motor_response_test ${catkin_LIBRARIES})
-
-add_executable(test_smooth_control src/test_smooth_control.cpp)
-target_link_libraries(test_smooth_control ${catkin_LIBRARIES})
-
-add_executable(test_motor_control src/test_motor_control.cpp)
-target_link_libraries(test_motor_control ${catkin_LIBRARIES})
-
-add_executable(dual_motor_test src/dual_motor_test.cpp)
-target_link_libraries(dual_motor_test ${catkin_LIBRARIES})
-
 
 #############
 ## Install ##
@@ -223,11 +202,7 @@ target_link_libraries(dual_motor_test ${catkin_LIBRARIES})
 
 ## Mark executable scripts (Python etc.) for installation
 ## in contrast to setup.py, you can choose the destination
-catkin_install_python(PROGRAMS
-  scripts/motor_control.py
-  scripts/auto_dual_test.py
-  DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
-)
+
 
 ## Mark executables for installation
 ## See http://docs.ros.org/melodic/api/catkin/html/howto/format1/building_executables.html
@@ -251,7 +226,7 @@ install(DIRECTORY include/${PROJECT_NAME}/
 )
 
 # 라이브러리 설치
-install(TARGETS spi_controller i2c_controller mcp4921 HallSensorEncoder smooth_motor_controller motor_controller
+install(TARGETS spi_controller i2c_controller mcp4921 HallSensorEncoder motor_controller
   ARCHIVE DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
   LIBRARY DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
   RUNTIME DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION} 
