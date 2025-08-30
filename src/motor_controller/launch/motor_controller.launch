@@ -30,7 +30,7 @@
     <param name="use_pid_control" value="true"/>     <!-- PID 제어 비활성화 -->
     <param name="use_balance_control" value="true"/>  <!-- 밸런스 제어 비활성화 -->
     <param name="use_smooth_control" value="false"/>   <!-- 부드러운 제어 활성화 -->
-    <param name="target_roll_angle" value="0.0"/>
+    <param name="target_roll_angle" value="-0.7"/>
     
     <!-- 부드러운 제어 매개변수 (매우 보수적) -->
     <param name="smooth_max_acceleration" value="15.0"/>  <!-- 10%/초 최대 가속도 -->
@@ -64,8 +64,8 @@
     
     <!-- 밸런싱 PID 게인 (Roll 각도 제어) - Phase 0: 긴급 안정화 -->
     <param name="pid_kp_balance" value="9.0"/>   <!-- 0.8 → 0.3 극도로 보수적 -->
-    <param name="pid_ki_balance" value="2.0"/>   <!-- 적분 항 완전 제거 -->
-    <param name="pid_kd_balance" value="0.5"/>  <!-- 0.1 → 0.05 미분 최소화 -->
+    <param name="pid_ki_balance" value="3.0"/>   <!-- 적분 항 완전 제거 -->
+    <param name="pid_kd_balance" value="0.7"/>  <!-- 0.1 → 0.05 미분 최소화 -->
     
     <!-- 모터 PID 게인 (속도 제어용) -->
     <param name="pid_kp_motor0" value="0.2"/>

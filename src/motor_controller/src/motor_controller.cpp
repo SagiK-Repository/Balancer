@@ -141,11 +141,7 @@ MotorController::MotorController(ros::NodeHandle& nh, ros::NodeHandle& pnh)
     ROS_INFO("brake_zone_threshold: %f, brake_duration: %f", brake_zone_threshold_, brake_duration_);
 
     // PID 게인 설정
-    pid_motor0_.setGains(kp0, ki0, kd0);
-    pid_motor1_.setGains(kp1, ki1, kd1);
     pid_balance_.setGains(kp_bal, ki_bal, kd_bal);
-    pid_motor0_.setOutputLimits(-max_speed_, max_speed_);
-    pid_motor1_.setOutputLimits(-max_speed_, max_speed_);
 
     ROS_INFO("Motor0 PID Gains - Kp: %.2f, Ki: %.2f, Kd: %.2f", kp0, ki0, kd0);
     ROS_INFO("Motor1 PID Gains - Kp: %.2f, Ki: %.2f, Kd: %.2f", kp1, ki1, kd1);
@@ -190,16 +186,23 @@ MotorController::MotorController(ros::NodeHandle& nh, ros::NodeHandle& pnh)
     i2c.init();
 
     // ROS 토픽 구독/발행
-    speed0_sub_ = nh_.subscribe("target_speed0", 10, &MotorController::speed0Callback, this);
-    actual_speed0_pub_ = nh_.advertise<std_msgs::Float32>("actual_speed0", 10);
+    //speed0_sub_ = nh_.subscribe("target_speed0", 10, &MotorController::speed0Callback, this);
+    //actual_speed0_pub_ = nh_.advertise<std_msgs::Float32>("actual_speed0", 10);
     
-    speed1_sub_ = nh_.subscribe("target_speed1", 10, &MotorController::speed1Callback, this);
-    actual_speed1_pub_ = nh_.advertise<std_msgs::Float32>("actual_speed1", 10);
+    //speed1_sub_ = nh_.subscribe("target_speed1", 10, &MotorController::speed1Callback, this);
+    //actual_speed1_pub_ = nh_.advertise<std_msgs::Float32>("actual_speed1", 10);
     
     // 센서 데이터 발행자 (테스트용)
-    sensor_roll_pub_ = nh_.advertise<std_msgs::Float32>("sensor_roll", 10);
-    sensor_pitch_pub_ = nh_.advertise<std_msgs::Float32>("sensor_pitch", 10);
-    sensor_confidence_pub_ = nh_.advertise<std_msgs::Float32>("sensor_confidence", 10);
+    aroll_pub_ = nh_.advertise<std_msgs::Float32>("aroll", 10);
+    groll_pub_ = nh_.advertise<std_msgs::Float32>("groll", 10);
+
+    target_roll_pub_ = nh_.advertise<std_msgs::Float32>("target_roll", 10);
+    actual_roll_pub_ = nh_.advertise<std_msgs::Float32>("actual_roll", 10);
+    balance_output_pub_ = nh_.advertise<std_msgs::Float32>("balance_output", 10);
+    balance_P_pub_ = nh_.advertise<std_msgs::Float32>("balance_P", 10);
+    balance_I_pub_ = nh_.advertise<std_msgs::Float32>("balance_I", 10);
+    balance_D_pub_ = nh_.advertise<std_msgs::Float32>("balance_D", 10);
+
     
     // 타이머 설정
     timer0_ = nh_.createTimer(ros::Duration(0.005), &MotorController::timerCallback, this);
@@ -333,8 +336,8 @@ void MotorController::timerCallback(const ros::TimerEvent& event) {
     actual_speed_0 = encoder.getWheel0Velocity() * 60 / 3.1415 / 2;
     actual_speed_1 = encoder.getWheel1Velocity() * 60 / 3.1415 / 2;
     
-    double sensors[13];
-    i2c.getData(sensors,sensors+11);
+    static double sensors[13]; // 실패 시 이전 연산값 활용
+    bool result = i2c.getData(sensors,sensors+11);
 
     // 지면과의 각도 계산 및 출력
     double roll_angle = sensors[6];           // 즉시 응답 각도
@@ -358,13 +361,43 @@ void MotorController::timerCallback(const ros::TimerEvent& event) {
         ,(float)pid_balance_.getError());*/
     static int count = 0;
     count++;
-    if (count % 200 == 0) {
-        ROS_INFO("TCB = %5.1f %5.1f %5.1f"
+    if (count % 10 == 0) {
+        ROS_INFO("target roll : %5.1f / current roll : %5.1f / balance output : %5.1f / arg_PID : %5.1f %5.1f %5.1f"
             ,(float)target_roll_
             ,(float)current_roll_
-            ,(float)balance_output_);
+            ,(float)balance_output_
+            ,(float)pid_balance_.getError()*pid_balance_.kp_
+            ,(float)pid_balance_.getIntegral()*pid_balance_.ki_
+            ,(float)pid_balance_.getDerivative()*pid_balance_.kd_
+            );
     }
-    
+    std_msgs::Float32 aroll_msg;
+    std_msgs::Float32 groll_msg;
+
+    std_msgs::Float32 target_roll_msg;
+    std_msgs::Float32 actual_roll_msg;
+    std_msgs::Float32 balance_output_msg;
+    std_msgs::Float32 balance_P_msg;
+    std_msgs::Float32 balance_I_msg;
+    std_msgs::Float32 balance_D_msg;
+
+    aroll_msg.data = sensors[3];
+    groll_msg.data = i2c.getRoll();
+    target_roll_msg.data = target_roll_;
+    actual_roll_msg.data = current_roll_;
+    balance_output_msg.data = balance_output_;
+    balance_P_msg.data = (float)pid_balance_.getError()*pid_balance_.kp_;
+    balance_I_msg.data = pid_balance_.getIntegral()*pid_balance_.ki_;
+    balance_D_msg.data = pid_balance_.getDerivative()*pid_balance_.kd_;
+
+    aroll_pub_.publish(aroll_msg);
+    groll_pub_.publish(groll_msg);
+    target_roll_pub_.publish(target_roll_msg);
+    actual_roll_pub_.publish(actual_roll_msg);
+    balance_output_pub_.publish(balance_output_msg);
+    balance_P_pub_.publish(balance_P_msg);
+    balance_I_pub_.publish(balance_I_msg);
+    balance_D_pub_.publish(balance_D_msg);
 }
 
 void MotorController::checkHallSensor(const ros::TimerEvent& event) {

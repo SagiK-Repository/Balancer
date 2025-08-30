@@ -30,9 +30,9 @@ public:
     double getDerivative() const { return derivative_; }
     double getOutput() const { return output_; }
 
-private:
     // PID 게인
     double kp_, ki_, kd_;
+private:
     
     // PID 상태 변수
     double error_;
@@ -91,10 +91,16 @@ class MotorController { public:
     ros::Subscriber speed0_sub_;
     ros::Subscriber speed1_sub_;
     ros::Publisher actual_speed0_pub_;
-    ros::Publisher actual_speed1_pub_;
-    ros::Publisher sensor_roll_pub_;
-    ros::Publisher sensor_pitch_pub_;
-    ros::Publisher sensor_confidence_pub_;
+    ros::Publisher aroll_pub_;
+    ros::Publisher groll_pub_;
+
+    ros::Publisher target_roll_pub_;
+    ros::Publisher actual_roll_pub_;
+    ros::Publisher balance_output_pub_;
+    ros::Publisher balance_P_pub_;
+    ros::Publisher balance_I_pub_;
+    ros::Publisher balance_D_pub_;
+
     ros::Timer timer0_;
     ros::Timer timer1_;
     
