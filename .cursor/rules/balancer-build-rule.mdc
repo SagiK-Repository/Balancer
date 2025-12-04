@@ -1,0 +1,11 @@
+---
+description: ROS 빌드 연결 정보 및 연결 명령어 실행 방법
+alwaysApply: false
+---
+연결 정보는 다음과 같아.
+```python
+HOSTNAME = "192.168.0.28"  # 원격 서버 IP 주소
+USERNAME = "tbot3"          # SSH 사용자명
+PASSWORD = "1234"           # SSH 비밀번호 (또는 SSH 키 사용)
+```
+만약 SSH를 사용해 업로드하고 디버그해야 한다면 `docs\개발과정\SSH_원격_프로젝트_업로드_가이드.md` 문서에 나온 방법대로 진행해
