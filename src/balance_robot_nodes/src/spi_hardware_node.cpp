@@ -1,6 +1,9 @@
 #include "balance_robot_nodes/spi_hardware_node.h"
 #include <ros/ros.h>
 #include <std_msgs/Float32.h>
+#include <sstream>
+#include <iomanip>
+#include <bitset>
 
 // BitBangSPI 실제 구현
 BitBangSPI::BitBangSPI(int mosi_pin, int miso_pin, int sclk_pin, int cs_pin,
@@ -37,10 +40,14 @@ void BitBangSPI::initGPIO() {
     sclk_line_ = gpiod_chip_get_line(chip_, sclk_pin_);
     cs_line_ = gpiod_chip_get_line(chip_, cs_pin_);
 
-    if (!mosi_line_ || !miso_line_ || !sclk_line_ || !cs_line_) {
+    if (!mosi_line_ || !miso_line_ || !sclk_line_) {
         gpiod_chip_close(chip_);
-        ROS_ERROR("Failed to get GPIO lines");
+        ROS_ERROR("Failed to get GPIO lines (MOSI, MISO, SCLK required)");
         return;
+    }
+    // CS 라인은 선택적 (홀 센서 읽기에는 필수 아님)
+    if (!cs_line_) {
+        ROS_WARN("CS GPIO line not available (pin %d) - continuing without CS", cs_pin_);
     }
 
     // 라인 설정
@@ -70,17 +77,16 @@ void BitBangSPI::initGPIO() {
 
     ret = gpiod_line_request_output(cs_line_, "spi_cs", 1);  // CS는 HIGH로 시작
     if (ret < 0) {
-        gpiod_line_release(mosi_line_);
-        gpiod_line_release(miso_line_);
-        gpiod_line_release(sclk_line_);
-        gpiod_chip_close(chip_);
-        ROS_ERROR("Failed to request CS GPIO line as output");
-        return;
+        // CS 라인 요청 실패 - 경고만 하고 계속 진행 (홀 센서 읽기에는 CS가 필수 아님)
+        ROS_WARN("Failed to request CS GPIO line as output (pin %d) - continuing without CS", cs_pin_);
+        cs_line_ = nullptr;  // CS 라인을 nullptr로 설정하여 사용하지 않음
+    } else {
+        // 초기 상태 설정
+        gpiod_line_set_value(cs_line_, 1);        // CS는 기본적으로 비활성화(HIGH)
     }
 
     // 초기 상태 설정
     gpiod_line_set_value(sclk_line_, cpol_);  // CPOL에 따른 초기 클럭 레벨
-    gpiod_line_set_value(cs_line_, 1);        // CS는 기본적으로 비활성화(HIGH)
     
     gpio_initialized_ = true;
 }
@@ -186,7 +192,7 @@ void BitBangSPI::setMaxSpeed(uint32_t speed_hz) {
 }
 
 void BitBangSPI::setCS(bool level) {
-    if (gpio_initialized_) {
+    if (gpio_initialized_ && cs_line_) {
         gpiod_line_set_value(cs_line_, level);
     }
 }
@@ -1000,29 +1006,107 @@ void SPIHardwareNode::readHallSensors() {
     uint8_t data = spi_->transfer(0x00);
     gpiod_line_set_value(latch_line_, 0);
     
-    // 홀센서 데이터 파싱 (실제 하드웨어 배치에 따라 조정)
-    uint8_t new_hall_state_0 = (data >> 0) & 0x7;  // 하위 3비트
-    uint8_t new_hall_state_1 = (data >> 3) & 0x7;  // 상위 3비트
+    // Raw 바이트 데이터를 비트 단위로 출력 (디버그용)
+    // 비트 7 6 5 4 3 2 1 0
+    //      [Motor1 2bit][unused][Motor0 2bit][unused]
+    // 실제 구조: 0b00xx00xx
+    //   - bit 7,6: Motor1 (좌측 모터, 2비트, 0~3)
+    //   - bit 3,2: Motor0 (우측 모터, 2비트, 0~3)
+    static int debug_counter = 0;
+    static uint8_t last_raw_data = 0xFF;
+    // 변화가 있을 때마다 출력 (또는 100번마다 한 번씩)
+    if (data != last_raw_data || debug_counter % 100 == 0) {
+        // 2진수 문자열 생성
+        char bin_str[9];
+        for (int i = 7; i >= 0; i--) {
+            bin_str[7-i] = ((data >> i) & 1) ? '1' : '0';
+        }
+        bin_str[8] = '\0';
+        fprintf(stderr, "[RAW_HALL] 0x%02X (0b%s) | Bits: [7:%d] [6:%d] [5:%d] [4:%d] [3:%d] [2:%d] [1:%d] [0:%d] | M0:%d M1:%d\n",
+                data, bin_str,
+                (data >> 7) & 1, (data >> 6) & 1, (data >> 5) & 1, (data >> 4) & 1,
+                (data >> 3) & 1, (data >> 2) & 1, (data >> 1) & 1, (data >> 0) & 1,
+                (data >> 2) & 0x3, (data >> 6) & 0x3);
+        fflush(stderr);
+        last_raw_data = data;
+    }
+    debug_counter++;
     
-    // 상태 변화 감지 및 카운트 업데이트
-    if (new_hall_state_0 != hall_state_0_) {
-        hall_count_0_++;
+    // 홀센서 데이터 파싱 (실제 하드웨어 배치에 따라 조정)
+    // Motor0 (우측 모터): bit 2, 3 (2비트) - 0~3
+    uint8_t new_hall_state_0 = (data >> 2) & 0x3;
+    // Motor1 (좌측 모터): bit 6, 7 (2비트) - 0~3
+    uint8_t new_hall_state_1 = (data >> 6) & 0x3;
+    
+    // 이전 엔코더 카운트 저장 (방향 감지용)
+    long prev_encoder_count_0 = encoder_.getWheel0Info().encoder_count;
+    long prev_encoder_count_1 = encoder_.getWheel1Info().encoder_count;
+    
+    // 상태 변화 감지
+    bool state_changed_0 = (new_hall_state_0 != hall_state_0_);
+    bool state_changed_1 = (new_hall_state_1 != hall_state_1_);
+    
+    if (state_changed_0) {
         hall_state_0_ = new_hall_state_0;
     }
     
-    if (new_hall_state_1 != hall_state_1_) {
-        hall_count_1_++;
+    if (state_changed_1) {
         hall_state_1_ = new_hall_state_1;
     }
     
-    // 엔코더 업데이트
+    // 엔코더 업데이트 (방향 감지 포함)
     encoder_.updateHallSensors(hall_state_0_, hall_state_1_);
+    
+    // 엔코더의 카운트 변화량을 사용하여 hall_count 업데이트 (방향 고려)
+    long current_encoder_count_0 = encoder_.getWheel0Info().encoder_count;
+    long current_encoder_count_1 = encoder_.getWheel1Info().encoder_count;
+    
+    long encoder_diff_0 = current_encoder_count_0 - prev_encoder_count_0;
+    long encoder_diff_1 = current_encoder_count_1 - prev_encoder_count_1;
+    
+    // 모터 명령 방향 정보
+    bool motor_dir_0 = current_command_.motor0_direction;
+    bool motor_dir_1 = current_command_.motor1_direction;
+    
+    // hall_count 업데이트 로직:
+    // 엔코더는 홀 센서 시퀀스의 물리적 방향을 감지하지만,
+    // 홀 센서 시퀀스 정의가 모터의 물리적 회전 방향과 반대일 수 있습니다.
+    // 따라서 모터 명령 방향을 기준으로 encoder_diff의 부호를 결정합니다.
+    // - 정방향 (motor_dir = true): encoder_diff를 그대로 사용
+    // - 역방향 (motor_dir = false): encoder_diff의 부호를 반전
+    // 단, encoder_diff가 비정상적으로 큰 경우(오버플로우 등)는 무시합니다.
+    
+    if (encoder_diff_0 != 0 && abs(encoder_diff_0) < 1000) {  // 비정상적인 점프 필터링
+        if (motor_dir_0) {
+            // 정방향: encoder_diff를 그대로 사용
+            hall_count_0_ += encoder_diff_0;
+        } else {
+            // 역방향: encoder_diff의 부호를 반전
+            hall_count_0_ -= encoder_diff_0;
+        }
+    }
+    
+    if (encoder_diff_1 != 0 && abs(encoder_diff_1) < 1000) {  // 비정상적인 점프 필터링
+        if (motor_dir_1) {
+            // 정방향: encoder_diff를 그대로 사용
+            hall_count_1_ += encoder_diff_1;
+        } else {
+            // 역방향: encoder_diff의 부호를 반전
+            hall_count_1_ -= encoder_diff_1;
+        }
+    }
     
     // 상태 업데이트
     current_status_.motor0_hall_state = hall_state_0_;
     current_status_.motor1_hall_state = hall_state_1_;
     current_status_.motor0_hall_count = hall_count_0_;
     current_status_.motor1_hall_count = hall_count_1_;
+    current_status_.raw_hall_data = data;  // Raw 바이트 데이터 저장
+    
+    // 2진수 텍스트 형식으로 변환 (예: "0b00110101")
+    std::ostringstream oss;
+    oss << "0b" << std::bitset<8>(data).to_string();
+    current_status_.raw_hall_data_binary = oss.str();
 }
 
 void SPIHardwareNode::calculateMotorSpeeds() {

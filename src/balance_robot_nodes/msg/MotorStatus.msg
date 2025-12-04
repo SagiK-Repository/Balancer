@@ -15,6 +15,10 @@ uint8 motor1_hall_state
 int32 motor0_hall_count
 int32 motor1_hall_count
 
+# Raw 홀센서 바이트 데이터 (디버그용)
+uint8 raw_hall_data
+string raw_hall_data_binary  # 2진수 텍스트 형식 (예: "0b00110101")
+
 # 모터 출력 상태
 float32 motor0_actual_output
 float32 motor1_actual_output
